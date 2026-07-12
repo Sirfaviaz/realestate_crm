@@ -17,12 +17,14 @@ import {
   type ContactRoleKey,
 } from "@/lib/contact-roles";
 import { BHK_OPTIONS } from "@/lib/inventory-presets";
-import { formatFileSize, mediaKind, validateMediaFiles } from "@/lib/media-validation";
-import { prepareMediaFiles } from "@/lib/compress-video";
 import { digitsOnly, isValidPhone, normalizePhone, phoneError } from "@/lib/phone";
 import { formatPrice } from "@/lib/utils";
 import { AppShell } from "@/components/app-shell";
 import { GooglePlacesInput } from "@/components/google-places-input";
+import {
+  SupplyPropertyForm,
+  validateSupplyPropertyValues,
+} from "@/components/supply-property-form";
 import {
   Badge,
   Button,
@@ -121,20 +123,6 @@ export default function LeadsPage() {
     }));
   };
 
-  const setPropertyType = (value: string) => {
-    setReqForm((f) => ({ ...f, property_types: [value] }));
-  };
-
-  const togglePreferredTenantType = (value: string) => {
-    if (value === "all") {
-      setPreferredTenantTypes([]);
-      return;
-    }
-    setPreferredTenantTypes((prev) =>
-      prev.includes(value) ? prev.filter((x) => x !== value) : [...prev, value]
-    );
-  };
-
   const addLocationAnchor = (place: { area: string; city: string; latitude?: number; longitude?: number }) => {
     if (place.latitude == null || place.longitude == null) return;
     const name = place.area || place.city;
@@ -144,15 +132,6 @@ export default function LeadsPage() {
       return [...prev, { name, lat: place.latitude!, lng: place.longitude! }];
     });
     if (!reqForm.city && place.city) setReqForm((f) => ({ ...f, city: place.city }));
-  };
-
-  /** Landlord/seller: one property pin, not a priority list. */
-  const setPropertyLocation = (place: { area: string; city: string; latitude?: number; longitude?: number }) => {
-    if (place.latitude == null || place.longitude == null) return;
-    const name = place.area || place.city;
-    if (!name) return;
-    setLocationAnchors([{ name, lat: place.latitude, lng: place.longitude }]);
-    if (place.city) setReqForm((f) => ({ ...f, city: f.city || place.city }));
   };
 
   const removeLocationAnchor = (index: number) => {
@@ -180,62 +159,28 @@ export default function LeadsPage() {
     }
   };
 
-  const onMediaPick = async (files: FileList | null) => {
-    if (!files?.length) return;
-    setMediaBusy(true);
-    setMediaError(null);
-    setMediaStatus(null);
-    setMediaProgress(null);
-    try {
-      const combined = [...mediaFiles, ...Array.from(files)];
-      const { files: prepared, error } = await prepareMediaFiles(combined, {
-        onStatus: setMediaStatus,
-        onProgress: setMediaProgress,
-      });
-      setMediaError(error);
-      if (!error) setMediaFiles(prepared);
-    } catch (e) {
-      setMediaError(e instanceof Error ? e.message : "Could not process media files.");
-    } finally {
-      setMediaBusy(false);
-      setMediaProgress(null);
-    }
-  };
-
-  const removeMediaFile = (index: number) => {
-    const next = mediaFiles.filter((_, i) => i !== index);
-    setMediaFiles(next);
-    setMediaError(next.length ? validateMediaFiles(next) : null);
-    setMediaStatus(null);
-  };
-
   const validateSupplyDetails = (): string | null => {
-    if (!reqForm.property_types.length) return "Select a property type.";
-    if (!reqForm.city.trim()) return "City is required.";
-    if (!locationAnchors.length) return "Property area is required.";
-    if (!reqForm.bhk) return "BHK is required.";
-    if (role === "landlord") {
-      if (!reqForm.rent_budget || Number(reqForm.rent_budget) <= 0) return "Asking rent is required.";
-      if (reqForm.security_deposit === "" || Number(reqForm.security_deposit) < 0) {
-        return "Security deposit is required.";
-      }
-      if (reqForm.maintenance === "" || Number(reqForm.maintenance) < 0) {
-        return "Maintenance is required.";
-      }
-    }
-    if (role === "seller") {
-      if (!reqForm.budget_max || Number(reqForm.budget_max) <= 0) return "Asking price is required.";
-    }
-    if (!reqForm.urgency) return "Urgency is required.";
-    if (!reqForm.move_in_date) return "Property available from date is required.";
-    if (!reqForm.lead_score) return "Lead score is required.";
-    if (!mediaFiles.length) return "At least one photo is required.";
-    const mediaErr = validateMediaFiles(mediaFiles);
-    if (mediaErr) return mediaErr;
-    if (!mediaFiles.some((f) => mediaKind(f) === "image")) {
-      return "At least one photo (image) is required. Videos alone are not enough.";
-    }
-    return null;
+    if (role !== "landlord" && role !== "seller") return null;
+    return validateSupplyPropertyValues(
+      {
+        property_types: reqForm.property_types,
+        city: reqForm.city,
+        location_anchors: locationAnchors,
+        city_center: cityCenter,
+        bhk: reqForm.bhk,
+        preferred_tenant_types: preferredTenantTypes,
+        budget_max: reqForm.budget_max,
+        rent_budget: reqForm.rent_budget,
+        security_deposit: reqForm.security_deposit,
+        maintenance: reqForm.maintenance,
+        urgency: reqForm.urgency,
+        move_in_date: reqForm.move_in_date,
+        lead_score: reqForm.lead_score,
+        notes: reqForm.notes,
+        media_files: mediaFiles,
+      },
+      role
+    );
   };
 
   const saveLead = async () => {
@@ -605,33 +550,91 @@ export default function LeadsPage() {
         </div>
       )}
 
-      {createStep === 2 && meta && (
+      {createStep === 2 && meta && isSupply && (role === "landlord" || role === "seller") && (
+        <Card className="space-y-3">
+          <SupplyPropertyForm
+            role={role}
+            values={{
+              property_types: reqForm.property_types,
+              city: reqForm.city,
+              location_anchors: locationAnchors,
+              city_center: cityCenter,
+              bhk: reqForm.bhk,
+              preferred_tenant_types: preferredTenantTypes,
+              budget_max: reqForm.budget_max,
+              rent_budget: reqForm.rent_budget,
+              security_deposit: reqForm.security_deposit,
+              maintenance: reqForm.maintenance,
+              urgency: reqForm.urgency,
+              move_in_date: reqForm.move_in_date,
+              lead_score: reqForm.lead_score,
+              notes: reqForm.notes,
+              media_files: mediaFiles,
+            }}
+            onChange={(v) => {
+              setReqForm((f) => ({
+                ...f,
+                property_types: v.property_types,
+                city: v.city,
+                bhk: v.bhk,
+                budget_max: v.budget_max,
+                rent_budget: v.rent_budget,
+                security_deposit: v.security_deposit,
+                maintenance: v.maintenance,
+                urgency: v.urgency,
+                move_in_date: v.move_in_date,
+                lead_score: v.lead_score,
+                notes: v.notes,
+              }));
+              setLocationAnchors(v.location_anchors);
+              setCityCenter(v.city_center);
+              setPreferredTenantTypes(v.preferred_tenant_types);
+              setMediaFiles(v.media_files);
+            }}
+            mediaBusy={mediaBusy}
+            mediaStatus={mediaStatus}
+            mediaProgress={mediaProgress}
+            mediaError={mediaError}
+            onMediaBusy={setMediaBusy}
+            onMediaStatus={setMediaStatus}
+            onMediaProgress={setMediaProgress}
+            onMediaError={setMediaError}
+            intro={`What are ${personForm.name}'s property details?`}
+          />
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          <Button className="w-full" disabled={loading || mediaBusy || !!mediaError} onClick={saveLead}>
+            {loading
+              ? "Saving..."
+              : role === "landlord"
+                ? "Save & find renters"
+                : "Save & find buyers"}
+          </Button>
+        </Card>
+      )}
+
+      {createStep === 2 && meta && !isSupply && (
         <Card className="space-y-3">
           <p className="text-sm text-slate-600">
-            {isSupply
-              ? `What are ${personForm.name}'s property details?`
-              : `What is ${personForm.name} looking for?`}
+            What is {personForm.name} looking for?
           </p>
           <div>
-            <div className="mb-2 text-sm font-medium">Property type{isSupply ? " *" : ""}</div>
+            <div className="mb-2 text-sm font-medium">Property type</div>
             <div className="flex flex-wrap gap-2">
               {PROPERTY_TYPES.map((t) => (
                 <button
                   key={t.value}
                   type="button"
-                  onClick={() => (isSupply ? setPropertyType(t.value) : togglePropertyType(t.value))}
+                  onClick={() => togglePropertyType(t.value)}
                   className={`rounded-full px-3 py-1 text-sm ${reqForm.property_types.includes(t.value) ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
                 >
                   {t.label}
                 </button>
               ))}
             </div>
-            {!isSupply && (
-              <p className="mt-1 text-xs text-slate-500">You can select more than one.</p>
-            )}
+            <p className="mt-1 text-xs text-slate-500">You can select more than one.</p>
           </div>
           <div>
-            <div className="mb-2 text-sm font-medium">City{isSupply ? " *" : ""}</div>
+            <div className="mb-2 text-sm font-medium">City</div>
             <GooglePlacesInput
               mode="city"
               value={reqForm.city}
@@ -644,108 +647,77 @@ export default function LeadsPage() {
               className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
             />
           </div>
-          {isSupply ? (
-            <div>
-              <div className="mb-2 text-sm font-medium">Property area *</div>
-              <GooglePlacesInput
-                mode="area"
-                clearOnSelect
-                locationBias={cityCenter}
-                onSelect={setPropertyLocation}
-                placeholder={reqForm.city ? `Area in ${reqForm.city}...` : "Property locality / area..."}
-                className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
-              />
-              {locationAnchors[0] && (
-                <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
-                  <span className="min-w-0 flex-1 text-sm font-medium text-emerald-900">
-                    {locationAnchors[0].name}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="Clear area"
-                    onClick={() => setLocationAnchors([])}
-                    className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-red-600"
+          <div>
+            <div className="mb-2 text-sm font-medium">Preferred areas</div>
+            <p className="mb-2 text-xs text-slate-500">
+              Add in priority order (1 = most preferred). Use arrows to reorder.
+            </p>
+            <GooglePlacesInput
+              mode="area"
+              clearOnSelect
+              locationBias={cityCenter}
+              onSelect={addLocationAnchor}
+              placeholder={reqForm.city ? `Area in ${reqForm.city}...` : "Add preferred area..."}
+              className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+            />
+            {locationAnchors.length > 0 && (
+              <ul className="mt-2 space-y-2">
+                {locationAnchors.map((a, index) => (
+                  <li
+                    key={`${a.lat}-${a.lng}-${a.name}`}
+                    className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2"
                   >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <>
-              <div>
-                <div className="mb-2 text-sm font-medium">Preferred areas</div>
-                <p className="mb-2 text-xs text-slate-500">
-                  Add in priority order (1 = most preferred). Use arrows to reorder.
-                </p>
-                <GooglePlacesInput
-                  mode="area"
-                  clearOnSelect
-                  locationBias={cityCenter}
-                  onSelect={addLocationAnchor}
-                  placeholder={reqForm.city ? `Area in ${reqForm.city}...` : "Add preferred area..."}
-                  className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
-                />
-                {locationAnchors.length > 0 && (
-                  <ul className="mt-2 space-y-2">
-                    {locationAnchors.map((a, index) => (
-                      <li
-                        key={`${a.lat}-${a.lng}-${a.name}`}
-                        className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2"
-                      >
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">
-                          {index + 1}
-                        </span>
-                        <span className="min-w-0 flex-1 text-sm font-medium text-emerald-900">{a.name}</span>
-                        <button
-                          type="button"
-                          aria-label="Move up"
-                          disabled={index === 0}
-                          onClick={() => moveLocationAnchor(index, -1)}
-                          className="rounded-lg p-1.5 text-emerald-800 disabled:opacity-30"
-                        >
-                          <ChevronUp className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Move down"
-                          disabled={index === locationAnchors.length - 1}
-                          onClick={() => moveLocationAnchor(index, 1)}
-                          className="rounded-lg p-1.5 text-emerald-800 disabled:opacity-30"
-                        >
-                          <ChevronDown className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Remove ${a.name}`}
-                          onClick={() => removeLocationAnchor(index)}
-                          className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-red-600"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <div>
-                <div className="mb-2 text-sm font-medium">Search radius</div>
-                <div className="flex gap-2">
-                  {RADIUS_OPTIONS.map((r) => (
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 text-sm font-medium text-emerald-900">{a.name}</span>
                     <button
-                      key={r.value}
                       type="button"
-                      onClick={() => setReqForm({ ...reqForm, search_radius_km: r.value })}
-                      className={`rounded-full px-3 py-1 text-sm ${reqForm.search_radius_km === r.value ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
+                      aria-label="Move up"
+                      disabled={index === 0}
+                      onClick={() => moveLocationAnchor(index, -1)}
+                      className="rounded-lg p-1.5 text-emerald-800 disabled:opacity-30"
                     >
-                      {r.label}
+                      <ChevronUp className="h-4 w-4" />
                     </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-          {!isSupply && (role === "renter" || role === "buyer") && (
+                    <button
+                      type="button"
+                      aria-label="Move down"
+                      disabled={index === locationAnchors.length - 1}
+                      onClick={() => moveLocationAnchor(index, 1)}
+                      className="rounded-lg p-1.5 text-emerald-800 disabled:opacity-30"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${a.name}`}
+                      onClick={() => removeLocationAnchor(index)}
+                      className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-red-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <div className="mb-2 text-sm font-medium">Search radius</div>
+            <div className="flex gap-2">
+              {RADIUS_OPTIONS.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => setReqForm({ ...reqForm, search_radius_km: r.value })}
+                  className={`rounded-full px-3 py-1 text-sm ${reqForm.search_radius_km === r.value ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {(role === "renter" || role === "buyer") && (
             <div className="border-t border-slate-100 pt-3">
               <div className="mb-2 text-sm font-medium">Tenant / buyer profile</div>
               <select
@@ -785,68 +757,9 @@ export default function LeadsPage() {
             value={reqForm.bhk}
             onChange={(v) => setReqForm({ ...reqForm, bhk: v })}
             options={BHK_OPTIONS}
-            placeholder={isSupply ? "Select BHK *" : "Select BHK"}
+            placeholder="Select BHK"
           />
-          {role === "landlord" && (
-            <div>
-              <div className="mb-2 text-sm font-medium">Preferred tenants</div>
-              <p className="mb-2 text-xs text-slate-500">All, or pick one or more types.</p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => togglePreferredTenantType("all")}
-                  className={`rounded-full px-3 py-1 text-sm ${preferredTenantTypes.length === 0 ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
-                >
-                  All
-                </button>
-                {TENANT_TYPES.map((t) => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => togglePreferredTenantType(t.value)}
-                    className={`rounded-full px-3 py-1 text-sm ${preferredTenantTypes.includes(t.value) ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {isSupply ? (
-            meta.stream === "sales" ? (
-              <Input
-                placeholder="Asking price *"
-                type="number"
-                required
-                value={reqForm.budget_max}
-                onChange={(e) => setReqForm({ ...reqForm, budget_min: "", budget_max: e.target.value })}
-              />
-            ) : (
-              <div className="space-y-2">
-                <Input
-                  placeholder="Asking rent / month *"
-                  type="number"
-                  required
-                  value={reqForm.rent_budget}
-                  onChange={(e) => setReqForm({ ...reqForm, rent_budget: e.target.value })}
-                />
-                <Input
-                  placeholder="Security deposit *"
-                  type="number"
-                  required
-                  value={reqForm.security_deposit}
-                  onChange={(e) => setReqForm({ ...reqForm, security_deposit: e.target.value })}
-                />
-                <Input
-                  placeholder="Maintenance / month *"
-                  type="number"
-                  required
-                  value={reqForm.maintenance}
-                  onChange={(e) => setReqForm({ ...reqForm, maintenance: e.target.value })}
-                />
-              </div>
-            )
-          ) : meta.stream === "sales" ? (
+          {meta.stream === "sales" ? (
             <div className="grid grid-cols-2 gap-2">
               <Input placeholder="Budget min" type="number" value={reqForm.budget_min} onChange={(e) => setReqForm({ ...reqForm, budget_min: e.target.value })} />
               <Input placeholder="Budget max" type="number" value={reqForm.budget_max} onChange={(e) => setReqForm({ ...reqForm, budget_max: e.target.value })} />
@@ -854,77 +767,18 @@ export default function LeadsPage() {
           ) : (
             <Input placeholder="Rent budget / month" type="number" value={reqForm.rent_budget} onChange={(e) => setReqForm({ ...reqForm, rent_budget: e.target.value })} />
           )}
-          {isSupply && (
-            <div>
-              <div className="mb-2 text-sm font-medium">Photos & videos *</div>
-              <p className="mb-2 text-xs text-slate-500">
-                At least one photo required. Images up to 25 MB. Videos up to 100 MB after compression
-                (large videos are compressed in your browser automatically). Max 12 files.
-              </p>
-              <input
-                type="file"
-                multiple
-                disabled={mediaBusy}
-                required={mediaFiles.length === 0}
-                accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov,.webm"
-                className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-emerald-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white disabled:opacity-50"
-                onChange={(e) => {
-                  void onMediaPick(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-              {mediaBusy && (
-                <p className="mt-2 text-sm text-emerald-700">
-                  {mediaStatus || "Processing media…"}
-                  {mediaProgress != null ? ` ${Math.round(mediaProgress * 100)}%` : ""}
-                </p>
-              )}
-              {!mediaBusy && mediaStatus && !mediaError && (
-                <p className="mt-2 text-sm text-slate-600">{mediaStatus}</p>
-              )}
-              {mediaError && <p className="mt-2 text-sm text-red-600">{mediaError}</p>}
-              {mediaFiles.length > 0 && (
-                <ul className="mt-2 space-y-2">
-                  {mediaFiles.map((file, index) => (
-                    <li
-                      key={`${file.name}-${file.size}-${index}`}
-                      className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
-                    >
-                      <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-600">
-                        {mediaKind(file)}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-sm">{file.name}</span>
-                      <span className="shrink-0 text-xs text-slate-500">{formatFileSize(file.size)}</span>
-                      <button
-                        type="button"
-                        aria-label={`Remove ${file.name}`}
-                        onClick={() => removeMediaFile(index)}
-                        className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-red-600"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
           <select
             className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
             value={reqForm.urgency}
-            required={!!isSupply}
             onChange={(e) => setReqForm({ ...reqForm, urgency: e.target.value })}
           >
-            <option value="">{isSupply ? "Urgency *" : "Urgency"}</option>
+            <option value="">Urgency</option>
             {URGENCY_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
           </select>
           <div>
-            <div className="mb-2 text-sm font-medium">
-              {isSupply ? "Property available from *" : "Move-in date"}
-            </div>
+            <div className="mb-2 text-sm font-medium">Move-in date</div>
             <Input
               type="date"
-              required={!!isSupply}
               value={reqForm.move_in_date}
               onChange={(e) => setReqForm({ ...reqForm, move_in_date: e.target.value })}
             />
@@ -932,25 +786,19 @@ export default function LeadsPage() {
           <select
             className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
             value={reqForm.lead_score}
-            required={!!isSupply}
             onChange={(e) => setReqForm({ ...reqForm, lead_score: e.target.value })}
           >
-            <option value="">{isSupply ? "Lead score *" : "Lead score"}</option>
+            <option value="">Lead score</option>
             {LEAD_SCORE_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
           <Textarea placeholder="Notes (optional)" value={reqForm.notes} onChange={(e) => setReqForm({ ...reqForm, notes: e.target.value })} />
           {formError && <p className="text-sm text-red-600">{formError}</p>}
           <Button className="w-full" disabled={loading || mediaBusy || !!mediaError} onClick={saveLead}>
-            {loading
-              ? "Saving..."
-              : role === "landlord"
-                ? "Save & find renters"
-                : role === "seller"
-                  ? "Save & find buyers"
-                  : "Save & find properties"}
+            {loading ? "Saving..." : "Save & find properties"}
           </Button>
         </Card>
       )}
+
 
       {createStep === 3 && available && savedReqId && (
         <div className="space-y-4">

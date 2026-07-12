@@ -4,21 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import {
-  contactsApi,
-  listingsApi,
-  requirementsApi,
-  type Contact,
-  type LocationAnchor,
-} from "@/lib/api";
+import { contactsApi, listingsApi, requirementsApi, type Contact } from "@/lib/api";
 import { PROPERTY_TYPES } from "@/lib/contact-roles";
-import { BHK_OPTIONS } from "@/lib/inventory-presets";
-import { formatFileSize, validateMediaFiles } from "@/lib/media-validation";
-import { prepareMediaFiles } from "@/lib/compress-video";
 import { digitsOnly, isValidPhone, phoneError } from "@/lib/phone";
+import {
+  SupplyPropertyForm,
+  emptySupplyPropertyValues,
+  validateSupplyPropertyValues,
+  type SupplyPropertyValues,
+} from "@/components/supply-property-form";
 import { AppShell } from "@/components/app-shell";
-import { GooglePlacesInput } from "@/components/google-places-input";
-import { Button, Card, FormSelect, Input, ListItem, LoadingSpinner, Textarea } from "@/components/ui";
+import { Button, Card, Input, ListItem, LoadingSpinner } from "@/components/ui";
 
 type OwnerMode = "existing" | "new";
 
@@ -37,23 +33,11 @@ export default function NewPropertyPage() {
   const [lockedOwner, setLockedOwner] = useState<Contact | null>(null);
   const [ownerLocked, setOwnerLocked] = useState(Boolean(presetContactId));
   const [ownerForm, setOwnerForm] = useState({ name: "", phone: "", whatsapp: "" });
-  const [form, setForm] = useState({
-    title: "",
-    location_text: "",
-    city: "",
-    latitude: null as number | null,
-    longitude: null as number | null,
-    property_type: "",
-    bhk: "",
-    price: "",
-    security_deposit: "",
-    maintenance: "",
-    notes: "",
-  });
-  const [anchors, setAnchors] = useState<LocationAnchor[]>([]);
-  const [files, setFiles] = useState<File[]>([]);
+  const [supply, setSupply] = useState<SupplyPropertyValues>(emptySupplyPropertyValues);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [mediaStatus, setMediaStatus] = useState<string | null>(null);
+  const [mediaProgress, setMediaProgress] = useState<number | null>(null);
+  const [mediaError, setMediaError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingOwners, setLoadingOwners] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,75 +74,23 @@ export default function NewPropertyPage() {
     [lockedOwner, owners, contactId]
   );
 
-  const onPlace = (p: {
-    area: string;
-    city: string;
-    latitude?: number;
-    longitude?: number;
-  }) => {
-    const name = [p.area, p.city].filter(Boolean).join(", ");
-    setForm((f) => ({
-      ...f,
-      location_text: name,
-      city: p.city || f.city,
-      latitude: p.latitude ?? null,
-      longitude: p.longitude ?? null,
-    }));
-    if (p.latitude != null && p.longitude != null) {
-      setAnchors([{ name: p.area || name, lat: p.latitude, lng: p.longitude, radius_km: 5 }]);
-    }
-  };
-
-  const onFiles = async (list: FileList | null) => {
-    if (!list?.length) return;
-    const incoming = Array.from(list);
-    const err = validateMediaFiles([...files, ...incoming]);
-    if (err) {
-      setError(err);
-      return;
-    }
-    setMediaBusy(true);
-    setMediaStatus("Preparing media…");
-    try {
-      const { files: prepared, error: prepErr } = await prepareMediaFiles(incoming, {
-        onStatus: (msg) => setMediaStatus(msg),
-      });
-      if (prepErr) {
-        setError(prepErr);
-        return;
-      }
-      setFiles((prev) => [...prev, ...prepared]);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not prepare media");
-    } finally {
-      setMediaBusy(false);
-      setMediaStatus(null);
-    }
-  };
-
   const save = async () => {
     setError(null);
-    if (!form.location_text.trim()) {
-      setError("Location is required");
-      return;
-    }
-    if (!form.price) {
-      setError(stream === "rental" ? "Monthly rent is required" : "Asking price is required");
-      return;
-    }
-    if (!files.length) {
-      setError("Add at least one photo");
-      return;
-    }
-    const mediaErr = validateMediaFiles(files);
-    if (mediaErr) {
-      setError(mediaErr);
+    const supplyErr = validateSupplyPropertyValues(supply, role);
+    if (supplyErr) {
+      setError(supplyErr);
+      if (
+        supplyErr.toLowerCase().includes("photo") ||
+        supplyErr.toLowerCase().includes("video") ||
+        supplyErr.toLowerCase().includes("file")
+      ) {
+        setMediaError(supplyErr);
+      }
       return;
     }
 
     let ownerId = contactId;
-    if (ownerMode === "new") {
+    if (ownerMode === "new" && !ownerLocked) {
       const phoneErr =
         phoneError(ownerForm.phone) ||
         (ownerForm.whatsapp
@@ -179,7 +111,7 @@ export default function NewPropertyPage() {
 
     setLoading(true);
     try {
-      if (ownerMode === "new") {
+      if (ownerMode === "new" && !ownerLocked) {
         const contact = await contactsApi.create({
           name: ownerForm.name.trim(),
           phone: ownerForm.phone,
@@ -190,54 +122,63 @@ export default function NewPropertyPage() {
         ownerId = contact.id;
       }
 
-      const price = Number(form.price);
-      const deposit = form.security_deposit ? Number(form.security_deposit) : undefined;
-      const maintenance = form.maintenance ? Number(form.maintenance) : undefined;
-      const title =
-        form.title.trim() ||
-        [form.bhk, form.property_type, form.location_text.split(",")[0]].filter(Boolean).join(" · ") ||
-        "Property";
+      const anchor = supply.location_anchors[0];
+      const area = anchor?.name || supply.city || "Property";
+      const propType = supply.property_types[0];
+      const typeLabel = PROPERTY_TYPES.find((p) => p.value === propType)?.label || propType;
+      const title = [supply.bhk, typeLabel, area].filter(Boolean).join(" · ") || "Property";
+      const rent = supply.rent_budget ? Number(supply.rent_budget) : undefined;
+      const asking = supply.budget_max ? Number(supply.budget_max) : undefined;
+      const deposit = supply.security_deposit ? Number(supply.security_deposit) : undefined;
+      const maintenance = supply.maintenance ? Number(supply.maintenance) : undefined;
 
       const listing = await listingsApi.create({
         contact_id: ownerId,
         stream_type: stream,
         title,
-        location_text: form.location_text,
-        latitude: form.latitude ?? undefined,
-        longitude: form.longitude ?? undefined,
-        bhk: form.bhk || undefined,
-        property_type: form.property_type || undefined,
-        price,
-        monthly_rent: stream === "rental" ? price : undefined,
-        security_deposit: stream === "rental" ? deposit : undefined,
-        maintenance: stream === "rental" ? maintenance : undefined,
-        total_amount: stream === "sales" ? price : undefined,
-        description: form.notes || undefined,
+        location_text: [area, supply.city].filter(Boolean).join(", "),
+        latitude: anchor?.lat,
+        longitude: anchor?.lng,
+        bhk: supply.bhk || undefined,
+        property_type: propType,
+        price: stream === "rental" ? rent : asking,
+        monthly_rent: stream === "rental" ? rent : undefined,
+        security_deposit: role === "landlord" ? deposit : undefined,
+        maintenance: role === "landlord" ? maintenance : undefined,
+        total_amount: stream === "sales" ? asking : undefined,
+        description: supply.notes || undefined,
         status: "available",
       });
 
-      for (let i = 0; i < files.length; i++) {
-        await listingsApi.uploadMedia(listing.id, files[i], i);
+      for (let i = 0; i < supply.media_files.length; i++) {
+        await listingsApi.uploadMedia(listing.id, supply.media_files[i], i);
       }
 
       await requirementsApi.create({
         contact_id: ownerId!,
         role,
         stream_type: stream,
-        property_types: form.property_type ? [form.property_type] : undefined,
-        preferred_locations: anchors.length
-          ? anchors.map((a) => a.name)
-          : form.location_text
-            ? [form.location_text]
+        property_types: supply.property_types.length ? supply.property_types : undefined,
+        preferred_locations: supply.location_anchors.length
+          ? supply.location_anchors.map((a) => a.name)
+          : undefined,
+        location_anchors: supply.location_anchors.length ? supply.location_anchors : undefined,
+        city: supply.city || undefined,
+        bhk: supply.bhk || undefined,
+        budget_max: stream === "sales" ? asking : undefined,
+        rent_budget: stream === "rental" ? rent : undefined,
+        security_deposit: role === "landlord" ? deposit : undefined,
+        maintenance: role === "landlord" ? maintenance : undefined,
+        move_in_date: supply.move_in_date || undefined,
+        urgency: supply.urgency || undefined,
+        lead_score: supply.lead_score || undefined,
+        notes: supply.notes || undefined,
+        preferred_tenant_types:
+          role === "landlord"
+            ? supply.preferred_tenant_types.length
+              ? supply.preferred_tenant_types
+              : null
             : undefined,
-        location_anchors: anchors.length ? anchors : undefined,
-        city: form.city || undefined,
-        bhk: form.bhk || undefined,
-        budget_max: stream === "sales" ? price : undefined,
-        rent_budget: stream === "rental" ? price : undefined,
-        security_deposit: stream === "rental" ? deposit : undefined,
-        maintenance: stream === "rental" ? maintenance : undefined,
-        notes: form.notes || undefined,
         listing_id: listing.id,
         status: "active",
       });
@@ -259,7 +200,7 @@ export default function NewPropertyPage() {
       <p className="mb-4 text-sm text-slate-600">
         {ownerLocked && selectedOwner
           ? `Adding another property for ${selectedOwner.name}.`
-          : "Link to an existing landlord/seller to keep multiple properties under one person."}
+          : "Same details as a landlord/seller lead — keeps everything under one person."}
       </p>
 
       <Card className="mb-4 space-y-3">
@@ -393,87 +334,29 @@ export default function NewPropertyPage() {
         )}
       </Card>
 
-      <Card className="mb-4 space-y-3">
-        <div className="text-sm font-semibold text-slate-800">Property</div>
-        <GooglePlacesInput
-          onSelect={onPlace}
-          placeholder="Search location…"
-          className="flex min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+      <Card className="mb-4">
+        <SupplyPropertyForm
+          role={role}
+          values={supply}
+          onChange={setSupply}
+          mediaBusy={mediaBusy}
+          mediaStatus={mediaStatus}
+          mediaProgress={mediaProgress}
+          mediaError={mediaError}
+          onMediaBusy={setMediaBusy}
+          onMediaStatus={setMediaStatus}
+          onMediaProgress={setMediaProgress}
+          onMediaError={setMediaError}
+          intro={
+            selectedOwner
+              ? `What are ${selectedOwner.name}'s property details?`
+              : "Property details"
+          }
         />
-        <Input
-          placeholder="Location *"
-          value={form.location_text}
-          onChange={(e) => setForm({ ...form, location_text: e.target.value })}
-        />
-        <Input
-          placeholder="Title (optional)"
-          value={form.title}
-          onChange={(e) => setForm({ ...form, title: e.target.value })}
-        />
-        <FormSelect
-          value={form.property_type}
-          onChange={(v) => setForm({ ...form, property_type: v })}
-          options={PROPERTY_TYPES.map((p) => ({ value: p.value, label: p.label }))}
-          placeholder="Property type"
-        />
-        <FormSelect
-          value={form.bhk}
-          onChange={(v) => setForm({ ...form, bhk: v })}
-          options={BHK_OPTIONS}
-          placeholder="BHK"
-        />
-        <Input
-          type="number"
-          placeholder={stream === "rental" ? "Monthly rent *" : "Asking price *"}
-          value={form.price}
-          onChange={(e) => setForm({ ...form, price: e.target.value })}
-        />
-        {stream === "rental" && (
-          <>
-            <Input
-              type="number"
-              placeholder="Security deposit"
-              value={form.security_deposit}
-              onChange={(e) => setForm({ ...form, security_deposit: e.target.value })}
-            />
-            <Input
-              type="number"
-              placeholder="Maintenance / month"
-              value={form.maintenance}
-              onChange={(e) => setForm({ ...form, maintenance: e.target.value })}
-            />
-          </>
-        )}
-        <Textarea
-          placeholder="Notes"
-          value={form.notes}
-          onChange={(e) => setForm({ ...form, notes: e.target.value })}
-        />
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Photos / videos *</label>
-          <input
-            type="file"
-            accept="image/*,video/*"
-            multiple
-            disabled={mediaBusy}
-            onChange={(e) => onFiles(e.target.files)}
-            className="block w-full text-sm"
-          />
-          {mediaStatus && <p className="mt-1 text-xs text-slate-500">{mediaStatus}</p>}
-          {files.length > 0 && (
-            <ul className="mt-2 space-y-1 text-xs text-slate-600">
-              {files.map((f) => (
-                <li key={`${f.name}-${f.size}`}>
-                  {f.name} · {formatFileSize(f.size)}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
       </Card>
 
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
-      <Button className="w-full" disabled={loading || mediaBusy} onClick={save}>
+      <Button className="w-full" disabled={loading || mediaBusy || !!mediaError} onClick={save}>
         {loading ? "Saving…" : "Save property"}
       </Button>
       <p className="mt-3 text-center text-xs text-slate-500">
