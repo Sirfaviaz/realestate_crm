@@ -610,7 +610,7 @@ export default function LeadsPage() {
             {URGENCY_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
           </select>
           <div>
-            <div className="mb-2 text-sm font-medium">{isSupply ? "Available from" : "Move-in date"}</div>
+            <div className="mb-2 text-sm font-medium">{isSupply ? "Property available from" : "Move-in date"}</div>
             <Input
               type="date"
               value={reqForm.move_in_date}
