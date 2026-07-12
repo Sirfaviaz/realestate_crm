@@ -310,18 +310,43 @@ async def inform_match(
     info = _match_property_info(match)
     sent_label = body.notes or info.get("title") or "property"
     whom = follow_contact.name if follow_contact else "contact"
-    # Log on the lead we're working (landlord/seller/renter page timeline).
-    db.add(
-        Activity(
-            contact_id=contact.id if contact else None,
-            activity_type="match_informed",
-            content=(
-                f"Informed {whom} via {via}. Follow-up {follow_at.date().isoformat()}. "
-                f"Sent: {sent_label}"
-            ),
-            created_by_id=user.id,
+    channel = "WhatsApp" if via == "whatsapp" else "a call"
+    # Agent-side (lead being worked) + person contacted (renter/buyer) both get a timeline entry.
+    if contact:
+        db.add(
+            Activity(
+                contact_id=contact.id,
+                activity_type="match_informed",
+                content=(
+                    f"We sent {channel} to {whom} about this property: {sent_label}. "
+                    f"Follow-up scheduled {follow_at.date().isoformat()}."
+                ),
+                created_by_id=user.id,
+            )
         )
-    )
+    if follow_contact and (not contact or follow_contact.id != contact.id):
+        property_ref = sent_label
+        if match.listing_id:
+            property_ref = f"{info.get('title') or 'property'} (/listings/{match.listing_id})"
+        elif match.requirement and match.requirement.role in ("landlord", "seller"):
+            # Renter received landlord's property details
+            property_ref = sent_label
+        db.add(
+            Activity(
+                contact_id=follow_contact.id,
+                activity_type="match_informed",
+                content=f"We sent a {channel} message about this property: {property_ref}",
+                created_by_id=user.id,
+            )
+        )
+        db.add(
+            Activity(
+                contact_id=follow_contact.id,
+                activity_type="follow_up",
+                content=f"Follow-up scheduled for {follow_at.date().isoformat()} about: {sent_label}",
+                created_by_id=user.id,
+            )
+        )
     await db.commit()
     await db.refresh(match)
     return _match_response(match)
@@ -348,14 +373,16 @@ async def match_follow_up(
     if body.notes:
         match.notes = body.notes
     contact = match.requirement.contact if match.requirement else None
-    db.add(
-        Activity(
-            contact_id=contact.id if contact else None,
-            activity_type="match_follow_up",
-            content=f"Follow-up scheduled for match: {info if (info := _match_property_info(match).get('title')) else 'property'}",
-            created_by_id=user.id,
+    title = _match_property_info(match).get("title") or "property"
+    if contact:
+        db.add(
+            Activity(
+                contact_id=contact.id,
+                activity_type="follow_up",
+                content=f"Followed up / scheduled follow-up for {body.follow_up_at.date().isoformat()} about: {title}",
+                created_by_id=user.id,
+            )
         )
-    )
     await db.commit()
     await db.refresh(match)
     return _match_response(match)
@@ -367,7 +394,7 @@ async def update_match_status(
     match_id: UUID,
     body: MatchStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.USER)),
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.USER)),
 ):
     result = await db.execute(
         select(RequirementMatch)
@@ -380,6 +407,59 @@ async def update_match_status(
     match.status = body.status
     if body.notes:
         match.notes = body.notes
+
+    if body.status == "rejected":
+        info = _match_property_info(match)
+        title = info.get("title") or "property"
+        if match.listing_id:
+            title = f"{title} (/listings/{match.listing_id})"
+        req = match.requirement
+        req_contact = req.contact if req else None
+        other = match.matched_requirement.contact if match.matched_requirement else None
+        if req and req.role in ("landlord", "seller"):
+            # Landlord/seller passed on this renter/buyer
+            if req_contact:
+                db.add(
+                    Activity(
+                        contact_id=req_contact.id,
+                        activity_type="match_rejected",
+                        content=f"Not interested in this {info.get('matched_role') or 'lead'}: {title}",
+                        created_by_id=user.id,
+                    )
+                )
+            if other:
+                prop = body.notes or "the shared property"
+                if req_contact:
+                    prop = f"{req_contact.name}'s property"
+                db.add(
+                    Activity(
+                        contact_id=other.id,
+                        activity_type="match_rejected",
+                        content=f"Not interested in {prop}",
+                        created_by_id=user.id,
+                    )
+                )
+        else:
+            # Demand lead not interested in a property / supply lead
+            if req_contact:
+                db.add(
+                    Activity(
+                        contact_id=req_contact.id,
+                        activity_type="match_rejected",
+                        content=f"Not interested in {title}",
+                        created_by_id=user.id,
+                    )
+                )
+            if other:
+                db.add(
+                    Activity(
+                        contact_id=other.id,
+                        activity_type="match_rejected",
+                        content=f"{req_contact.name if req_contact else 'Lead'} not interested in this property",
+                        created_by_id=user.id,
+                    )
+                )
+
     await db.commit()
     await db.refresh(match)
     return _match_response(match)

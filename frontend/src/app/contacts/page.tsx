@@ -2,9 +2,24 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { contactsApi, listingsApi, requirementsApi, type Contact, type Listing } from "@/lib/api";
+import {
+  contactsApi,
+  listingsApi,
+  requirementsApi,
+  type Activity,
+  type Contact,
+  type LeadRequirement,
+  type Listing,
+} from "@/lib/api";
 import { formatPrice } from "@/lib/utils";
-import { CONTACT_TYPES, LEAD_SCORE_OPTIONS, URGENCY_OPTIONS, roleLabel } from "@/lib/contact-roles";
+import {
+  CONTACT_TYPES,
+  LEAD_SCORE_OPTIONS,
+  PROPERTY_TYPES,
+  TENANT_TYPES,
+  URGENCY_OPTIONS,
+  roleLabel,
+} from "@/lib/contact-roles";
 import { digitsOnly, isValidPhone, phoneError } from "@/lib/phone";
 import { whatsappLink } from "@/lib/whatsapp";
 import { AppShell } from "@/components/app-shell";
@@ -38,7 +53,10 @@ export default function ContactsPage() {
   const [form, setForm] = useState(formDefaults);
   const [formError, setFormError] = useState<string | null>(null);
   const [reqCounts, setReqCounts] = useState<Record<string, number>>({});
-  const [listings, setListings] = useState<Record<string, Listing[]>>({});
+  const [listingsByContact, setListingsByContact] = useState<Record<string, Listing[]>>({});
+  const [reqsByContact, setReqsByContact] = useState<Record<string, LeadRequirement[]>>({});
+  const [activitiesByContact, setActivitiesByContact] = useState<Record<string, Activity[]>>({});
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -94,22 +112,27 @@ export default function ContactsPage() {
     load();
   };
 
-  const updateLead = async (c: Contact, patch: Partial<Contact>) => {
-    const { id, ...rest } = c;
-    await contactsApi.update(id, { ...rest, ...patch });
-    load();
-  };
-
   const toggleExpanded = async (c: Contact) => {
     if (expanded === c.id) {
       setExpanded(null);
       return;
     }
     setExpanded(c.id);
-    const isOwner = c.roles.some((r) => r === "seller" || r === "landlord");
-    if (isOwner && !listings[c.id]) {
-      const rows = await listingsApi.list({ contact_id: c.id });
-      setListings((prev) => ({ ...prev, [c.id]: rows }));
+    setDetailLoading(true);
+    try {
+      const [acts, reqs] = await Promise.all([
+        contactsApi.activities(c.id),
+        requirementsApi.list({ contact_id: c.id }),
+      ]);
+      setActivitiesByContact((prev) => ({ ...prev, [c.id]: acts.slice(0, 10) }));
+      setReqsByContact((prev) => ({ ...prev, [c.id]: reqs }));
+      const isOwner = c.roles.some((r) => r === "seller" || r === "landlord");
+      if (isOwner) {
+        const rows = await listingsApi.list({ contact_id: c.id });
+        setListingsByContact((prev) => ({ ...prev, [c.id]: rows }));
+      }
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -206,64 +229,24 @@ export default function ContactsPage() {
                       ))}
                     </div>
                     {(reqCounts[c.id] ?? 0) > 0 && (
-                      <Link href="/leads" className="text-xs text-emerald-600 underline">
-                        {reqCounts[c.id]} active search{reqCounts[c.id] > 1 ? "es" : ""}
-                      </Link>
+                      <span className="text-xs text-emerald-600">
+                        {reqCounts[c.id]} active lead{reqCounts[c.id] > 1 ? "s" : ""}
+                      </span>
                     )}
                   </div>
                 }
               />
               {expanded === c.id && (
-                <div className="space-y-3 border-t border-slate-100 p-4">
-                  <div className="flex flex-wrap gap-2">
-                    {URGENCY_OPTIONS.map((u) => (
-                      <button
-                        key={u.value}
-                        type="button"
-                        onClick={() => updateLead(c, { urgency: u.value })}
-                        className={`rounded-full px-3 py-1 text-xs ${c.urgency === u.value ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
-                      >
-                        {u.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    {LEAD_SCORE_OPTIONS.map((s) => (
-                      <button
-                        key={s.value}
-                        type="button"
-                        onClick={() => updateLead(c, { lead_score: s.value })}
-                        className={`rounded-full px-3 py-1 text-xs capitalize ${c.lead_score === s.value ? "bg-orange-500 text-white" : "bg-slate-100"}`}
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                  </div>
-                  <Input
-                    type="datetime-local"
-                    value={c.follow_up_at ? c.follow_up_at.slice(0, 16) : ""}
-                    onChange={(e) => updateLead(c, { follow_up_at: e.target.value ? new Date(e.target.value).toISOString() : null })}
-                  />
-                  <Input
-                    type="datetime-local"
-                    value={c.site_visit_at ? c.site_visit_at.slice(0, 16) : ""}
-                    onChange={(e) => updateLead(c, { site_visit_at: e.target.value ? new Date(e.target.value).toISOString() : null })}
-                  />
-                  <Input
-                    placeholder="Site visit location"
-                    value={c.site_visit_location || ""}
-                    onChange={(e) => updateLead(c, { site_visit_location: e.target.value })}
-                  />
-                  <a
-                    href={whatsappLink(c.whatsapp || c.phone, { type: "follow_up", name: c.name, role: c.roles[0] })}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white"
-                  >
-                    WhatsApp
-                  </a>
-                  {(c.roles.includes("seller") || c.roles.includes("landlord")) && (
-                    <PropertyDetails listings={listings[c.id] || []} stream={c.stream_type} />
+                <div className="space-y-4 border-t border-slate-100 p-4">
+                  {detailLoading ? (
+                    <LoadingSpinner />
+                  ) : (
+                    <PersonDetailPanel
+                      contact={c}
+                      requirements={reqsByContact[c.id] || []}
+                      listings={listingsByContact[c.id] || []}
+                      activities={activitiesByContact[c.id] || []}
+                    />
                   )}
                 </div>
               )}
@@ -275,37 +258,224 @@ export default function ContactsPage() {
   );
 }
 
-function PropertyDetails({ listings, stream }: { listings: Listing[]; stream: string }) {
-  if (!listings.length) {
-    return <p className="text-sm text-slate-500">No property details yet — import or add via Data Entry → Listing.</p>;
-  }
+function PersonDetailPanel({
+  contact,
+  requirements,
+  listings,
+  activities,
+}: {
+  contact: Contact;
+  requirements: LeadRequirement[];
+  listings: Listing[];
+  activities: Activity[];
+}) {
+  const isSupply = contact.roles.some((r) => r === "landlord" || r === "seller");
+  const isDemand = contact.roles.some((r) => r === "renter" || r === "buyer");
+  const activeReqs = requirements.filter((r) => r.status === "active");
+  const timeline = buildTimeline(contact, activities);
+
   return (
-    <div className="space-y-3 border-t border-slate-100 pt-3">
-      <div className="text-sm font-semibold">Properties ({listings.length})</div>
-      {listings.map((l) => (
-        <Card key={l.id} className="space-y-1 bg-slate-50 py-3 text-sm">
-          <div className="font-medium">{l.project_name || l.title}</div>
-          {l.builder_name && <div className="text-slate-600">Builder: {l.builder_name}</div>}
-          {l.location_text && <div className="text-slate-600">{l.location_text}</div>}
-          <div className="flex flex-wrap gap-2">
-            {l.bhk && <Badge>{l.bhk}</Badge>}
-            {l.property_type && <Badge>{l.property_type}</Badge>}
-            {l.sqft != null && <Badge>{l.sqft} sqft</Badge>}
+    <>
+      {(isDemand || isSupply) && (
+        <div>
+          <div className="mb-2 text-sm font-semibold text-slate-800">
+            {isSupply ? "Property details" : "Looking for"}
           </div>
-          {(l.total_amount != null || l.monthly_rent != null || l.price != null) && (
-            <div>{formatPrice(l.monthly_rent ?? l.total_amount ?? l.price, stream)}</div>
-          )}
-          {l.amenities?.length ? <div className="text-slate-600">Amenities: {l.amenities.join(", ")}</div> : null}
-          {l.parking_details && <div className="text-slate-600">Parking: {l.parking_details}</div>}
-          {(l.gst_percent != null || l.down_payment_percent != null) && (
-            <div className="text-slate-600">
-              {l.gst_percent != null ? `GST ${l.gst_percent}%` : ""}
-              {l.down_payment_percent != null ? ` · Down ${l.down_payment_percent}%` : ""}
+          {activeReqs.length === 0 && listings.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              {isSupply
+                ? "No property details yet — add via Leads (landlord/seller) or Properties."
+                : "No active search yet — create a lead for this person."}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {activeReqs.map((r) => (
+                <RequirementSummary key={r.id} req={r} />
+              ))}
+              {isSupply && listings.map((l) => (
+                <ListingSummary key={l.id} listing={l} stream={contact.stream_type} />
+              ))}
             </div>
           )}
-        </Card>
-      ))}
+        </div>
+      )}
+
+      {!isDemand && !isSupply && (
+        <p className="text-sm text-slate-500">No renter/landlord/buyer/seller role details on this contact.</p>
+      )}
+
+      <div>
+        <div className="mb-2 text-sm font-semibold text-slate-800">Recent interactions</div>
+        {timeline.length === 0 ? (
+          <p className="text-sm text-slate-500">No interactions yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {timeline.slice(0, 10).map((item) => (
+              <li key={item.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                <ActivityLine text={item.text} />
+                <div className="mt-0.5 text-xs text-slate-400">{item.when}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <a
+          href={whatsappLink(contact.whatsapp || contact.phone, {
+            type: "follow_up",
+            name: contact.name,
+            role: contact.roles[0],
+          })}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white"
+        >
+          WhatsApp
+        </a>
+        {activeReqs[0] && (
+          <Link
+            href={`/leads/${activeReqs[0].id}`}
+            className="inline-flex rounded-lg border-2 border-slate-200 px-4 py-2 text-sm font-medium text-slate-700"
+          >
+            Open lead
+          </Link>
+        )}
+      </div>
+    </>
+  );
+}
+
+function RequirementSummary({ req }: { req: LeadRequirement }) {
+  const typeLabel = req.property_types?.map(
+    (t) => PROPERTY_TYPES.find((p) => p.value === t)?.label || t
+  ).join(", ");
+  const areas = req.preferred_locations?.length
+    ? req.preferred_locations.join(", ")
+    : (req.location_anchors || []).map((a) => a.name).filter(Boolean).join(", ") || req.city;
+  const isSupply = req.role === "landlord" || req.role === "seller";
+  const budget =
+    req.stream_type === "rental" && req.rent_budget != null
+      ? formatPrice(req.rent_budget, "rental")
+      : req.budget_max != null || req.budget_min != null
+        ? `${formatPrice(req.budget_min, "sales")} – ${formatPrice(req.budget_max, "sales")}`
+        : null;
+
+  return (
+    <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-slate-700">
+      <div className="font-medium text-emerald-900">
+        {isSupply ? "Listing lead" : "Search"} · {roleLabel(req.role)}
+        {req.bhk ? ` · ${req.bhk}` : ""}
+        {typeLabel ? ` · ${typeLabel}` : ""}
+      </div>
+      {areas && <div>{isSupply ? "Area" : "Areas"}: {areas}</div>}
+      {budget && <div>{isSupply ? (req.stream_type === "rental" ? "Rent" : "Price") : "Budget"}: {budget}</div>}
+      {isSupply && req.security_deposit != null && (
+        <div>Deposit: {formatPrice(req.security_deposit, "sales")}</div>
+      )}
+      {isSupply && req.maintenance != null && (
+        <div>Maintenance: {formatPrice(req.maintenance, "rental")}</div>
+      )}
+      {req.tenant_type && (
+        <div>
+          Tenant: {TENANT_TYPES.find((t) => t.value === req.tenant_type)?.label || req.tenant_type}
+          {req.occupant_count != null ? ` · ${req.occupant_count} occupants` : ""}
+        </div>
+      )}
+      <Link href={`/leads/${req.id}`} className="mt-1 inline-block text-xs font-medium text-emerald-700 underline">
+        View lead & matches
+      </Link>
     </div>
+  );
+}
+
+function ListingSummary({ listing, stream }: { listing: Listing; stream: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+      <Link href={`/listings/${listing.id}`} className="font-medium text-emerald-800 underline">
+        {listing.project_name || listing.title}
+      </Link>
+      {listing.location_text && <div>{listing.location_text}</div>}
+      <div className="mt-1 flex flex-wrap gap-1">
+        {listing.bhk && <Badge>{listing.bhk}</Badge>}
+        {listing.property_type && <Badge>{listing.property_type}</Badge>}
+      </div>
+      {(listing.monthly_rent != null || listing.price != null) && (
+        <div className="mt-1">{formatPrice(listing.monthly_rent ?? listing.price, stream)}</div>
+      )}
+    </div>
+  );
+}
+
+function buildTimeline(contact: Contact, activities: Activity[]) {
+  const items: { id: string; text: string; when: string; at: number }[] = activities.map((a) => ({
+    id: a.id,
+    text: humanizeActivity(a),
+    when: new Date(a.created_at).toLocaleString(),
+    at: new Date(a.created_at).getTime(),
+  }));
+
+  if (contact.site_visit_at) {
+    const at = new Date(contact.site_visit_at).getTime();
+    items.push({
+      id: `site-${contact.id}`,
+      text: `Showed property (site visit)${contact.site_visit_location ? ` at ${contact.site_visit_location}` : ""}`,
+      when: new Date(contact.site_visit_at).toLocaleString(),
+      at,
+    });
+  }
+  if (contact.follow_up_at) {
+    const at = new Date(contact.follow_up_at).getTime();
+    items.push({
+      id: `fu-${contact.id}`,
+      text: `Follow-up scheduled`,
+      when: new Date(contact.follow_up_at).toLocaleString(),
+      at,
+    });
+  }
+
+  return items.sort((a, b) => b.at - a.at);
+}
+
+function humanizeActivity(a: Activity): string {
+  const raw = a.content?.trim() || "";
+  switch (a.activity_type) {
+    case "match_informed":
+      if (/whatsapp/i.test(raw)) return raw;
+      return raw || "We sent a WhatsApp / call about a property";
+    case "match_rejected":
+      return raw.startsWith("Not interested") ? raw : `Not interested in ${raw || "a property"}`;
+    case "follow_up":
+    case "match_follow_up":
+      return raw || "Followed up";
+    case "site_visit":
+      return raw || "Site visit";
+    case "call":
+      return raw || "Called";
+    case "whatsapp":
+      return raw || "WhatsApp message";
+    case "note":
+      return raw || "Note";
+    default:
+      return raw || a.activity_type.replace(/_/g, " ");
+  }
+}
+
+function ActivityLine({ text }: { text: string }) {
+  const parts = text.split(/(\/listings\/[0-9a-f-]{36})/gi);
+  return (
+    <span>
+      {parts.map((part, i) => {
+        if (/^\/listings\/[0-9a-f-]{36}$/i.test(part)) {
+          return (
+            <Link key={`${part}-${i}`} href={part} className="font-medium text-emerald-700 underline">
+              view property
+            </Link>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </span>
   );
 }
 
