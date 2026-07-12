@@ -15,6 +15,7 @@ from app.models.listing import Listing
 from app.models.requirement import LeadRequirement, RequirementMatch
 from app.models.user import User
 from app.schemas import (
+    CloseMatchRequest,
     InformMatchRequest,
     LeadRequirementCreate,
     LeadRequirementResponse,
@@ -288,13 +289,31 @@ async def inform_match(
     via = body.via
     if via not in ("call", "whatsapp"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "via must be call or whatsapp")
-    match.status = f"informed_{via}"
+    follow_at = datetime.now(UTC) + timedelta(days=1)
+    # Leave "Matches to inform" and enter follow-up queue.
+    match.status = "follow_up"
     match.informed_at = datetime.now(UTC)
     match.informed_via = via
-    follow_at = datetime.now(UTC) + timedelta(days=1)
     match.follow_up_at = follow_at
     if body.notes:
         match.notes = body.notes
+
+    # Mirror match must also leave "new" so it doesn't stay in Matches to inform.
+    if match.matched_requirement_id:
+        mirror = (
+            await db.execute(
+                select(RequirementMatch).where(
+                    RequirementMatch.requirement_id == match.matched_requirement_id,
+                    RequirementMatch.matched_requirement_id == match.requirement_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if mirror and mirror.status not in ("rejected", "closed"):
+            mirror.status = "follow_up"
+            mirror.informed_at = match.informed_at
+            mirror.informed_via = via
+            mirror.follow_up_at = follow_at
+
     contact = match.requirement.contact if match.requirement else None
     # Follow up with the person we messaged (counterpart for supply leads).
     follow_contact = contact
@@ -329,7 +348,6 @@ async def inform_match(
         if match.listing_id:
             property_ref = f"{info.get('title') or 'property'} (/listings/{match.listing_id})"
         elif match.requirement and match.requirement.role in ("landlord", "seller"):
-            # Renter received landlord's property details
             property_ref = sent_label
         db.add(
             Activity(
@@ -350,6 +368,32 @@ async def inform_match(
     await db.commit()
     await db.refresh(match)
     return _match_response(match)
+
+
+@router.post("/{requirement_id}/matches/{match_id}/close", response_model=RequirementMatchResponse)
+async def close_match_deal(
+    requirement_id: UUID,
+    match_id: UUID,
+    body: CloseMatchRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.USER)),
+):
+    result = await db.execute(
+        select(RequirementMatch)
+        .options(*_MATCH_LOAD)
+        .where(RequirementMatch.id == match_id, RequirementMatch.requirement_id == requirement_id)
+    )
+    match = result.scalar_one_or_none()
+    if not match:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Match not found")
+    from app.services.deals_close import close_match_as_deal
+
+    notes = body.notes if body else None
+    await close_match_as_deal(db, match, user_id=user.id, notes=notes)
+    result = await db.execute(
+        select(RequirementMatch).options(*_MATCH_LOAD).where(RequirementMatch.id == match_id)
+    )
+    return _match_response(result.scalar_one())
 
 
 @router.post("/{requirement_id}/matches/{match_id}/follow-up", response_model=RequirementMatchResponse)

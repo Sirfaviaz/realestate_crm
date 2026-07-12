@@ -6,7 +6,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.contact import Contact
+from app.models.contact import Contact, Deal
 from app.models.inventory import Project, UnitOption, UnitSpec
 from app.models.listing import Listing
 from app.models.requirement import LeadRequirement, RequirementMatch
@@ -91,7 +91,9 @@ def _match_dict(m: RequirementMatch) -> dict:
         "requirement_id": str(m.requirement_id),
         "status": m.status,
         "match_score": m.match_score,
-        # Person to inform (the lead this match belongs to)
+        "informed_via": m.informed_via,
+        "informed_at": m.informed_at.isoformat() if m.informed_at else None,
+        "follow_up_at": m.follow_up_at.isoformat() if m.follow_up_at else None,
         "contact_name": lead.name if lead else None,
         "contact_phone": lead.phone if lead else None,
         "contact_whatsapp": (lead.whatsapp or lead.phone) if lead else None,
@@ -102,11 +104,39 @@ def _match_dict(m: RequirementMatch) -> dict:
     }
 
 
+def _deal_dict(d: Deal) -> dict:
+    return {
+        "id": str(d.id),
+        "stream_type": d.stream_type,
+        "stage": d.stage,
+        "contact_id": str(d.contact_id),
+        "contact_name": d.contact.name if d.contact else None,
+        "contact_phone": d.contact.phone if d.contact else None,
+        "listing_id": str(d.listing_id) if d.listing_id else None,
+        "requirement_id": str(d.requirement_id) if d.requirement_id else None,
+        "requirement_summary": d.requirement_summary,
+        "created_at": d.created_at.isoformat() if d.created_at else None,
+        "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+    }
+
+
+def _match_load():
+    return [
+        selectinload(RequirementMatch.listing).selectinload(Listing.contact),
+        selectinload(RequirementMatch.spec)
+        .selectinload(UnitSpec.option)
+        .selectinload(UnitOption.project)
+        .selectinload(Project.location),
+        selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
+        selectinload(RequirementMatch.matched_requirement).selectinload(LeadRequirement.contact),
+    ]
+
+
 async def get_dashboard(db: AsyncSession, user_id: UUID | None = None) -> dict:
     now = datetime.now(UTC)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
-    soon = now + timedelta(hours=24)
+    soon = now + timedelta(hours=48)
 
     def scoped():
         stmt = select(Contact)
@@ -148,34 +178,62 @@ async def get_dashboard(db: AsyncSession, user_id: UUID | None = None) -> dict:
     ).scalars().all()
 
     matches_to_inform: list = []
+    match_follow_ups: list = []
     try:
+        base_opts = _match_load()
         match_stmt = (
             select(RequirementMatch)
-            .options(
-                selectinload(RequirementMatch.listing).selectinload(Listing.contact),
-                selectinload(RequirementMatch.spec)
-                .selectinload(UnitSpec.option)
-                .selectinload(UnitOption.project)
-                .selectinload(Project.location),
-                selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
-                selectinload(RequirementMatch.matched_requirement).selectinload(LeadRequirement.contact),
-            )
+            .options(*base_opts)
             .where(RequirementMatch.status == "new")
             .order_by(RequirementMatch.created_at.desc())
             .limit(20)
         )
+        fu_stmt = (
+            select(RequirementMatch)
+            .options(*base_opts)
+            .where(
+                or_(
+                    RequirementMatch.status == "follow_up",
+                    RequirementMatch.status.like("informed%"),
+                ),
+                RequirementMatch.follow_up_at.isnot(None),
+            )
+            .order_by(RequirementMatch.follow_up_at.asc())
+            .limit(30)
+        )
         if user_id:
-            # Explicit ON clause — requirement_matches has two FKs to lead_requirements.
             match_stmt = match_stmt.join(
                 LeadRequirement,
                 RequirementMatch.requirement_id == LeadRequirement.id,
             ).where(LeadRequirement.assigned_user_id == user_id)
+            fu_stmt = fu_stmt.join(
+                LeadRequirement,
+                RequirementMatch.requirement_id == LeadRequirement.id,
+            ).where(LeadRequirement.assigned_user_id == user_id)
         matches_to_inform = list((await db.execute(match_stmt)).scalars().all())
+        match_follow_ups = list((await db.execute(fu_stmt)).scalars().all())
     except Exception as exc:
-        # Missing migration columns or stale schema should not take down the whole Today page.
         logger.warning("Dashboard matches query failed: %s", exc)
         await db.rollback()
         matches_to_inform = []
+        match_follow_ups = []
+
+    closed_deals: list = []
+    try:
+        deal_stmt = (
+            select(Deal)
+            .options(selectinload(Deal.contact))
+            .where(Deal.stage == "closed")
+            .order_by(Deal.updated_at.desc())
+            .limit(30)
+        )
+        if user_id:
+            deal_stmt = deal_stmt.where(Deal.assigned_user_id == user_id)
+        closed_deals = list((await db.execute(deal_stmt)).scalars().all())
+    except Exception as exc:
+        logger.warning("Dashboard closed deals query failed: %s", exc)
+        await db.rollback()
+        closed_deals = []
 
     role_counts: dict[str, int] = {}
     for role, aliases in [
@@ -190,8 +248,10 @@ async def get_dashboard(db: AsyncSession, user_id: UUID | None = None) -> dict:
     return {
         "overdue": [_contact_dict(c) for c in overdue],
         "follow_ups_due": [_contact_dict(c) for c in follow_ups_due],
+        "match_follow_ups": [_match_dict(m) for m in match_follow_ups],
         "site_visits_today": [_contact_dict(c) for c in site_visits],
         "hot_leads": [_contact_dict(c) for c in hot_leads],
         "matches_to_inform": [_match_dict(m) for m in matches_to_inform],
+        "closed_deals": [_deal_dict(d) for d in closed_deals],
         "role_counts": role_counts,
     }

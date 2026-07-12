@@ -168,6 +168,8 @@ class DealCreate(BaseModel):
     stream_type: str
     contact_id: UUID
     spec_id: UUID | None = None
+    listing_id: UUID | None = None
+    requirement_id: UUID | None = None
     stage: str = "new"
     requirement_summary: str | None = None
     follow_up_at: datetime | None = None
@@ -417,4 +419,8 @@ class MatchFollowUpRequest(BaseModel):
 
 class MatchStatusUpdate(BaseModel):
     status: str
+    notes: str | None = None
+
+
+class CloseMatchRequest(BaseModel):
     notes: str | None = None

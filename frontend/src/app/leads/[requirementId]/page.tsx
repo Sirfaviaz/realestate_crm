@@ -220,6 +220,16 @@ export default function RequirementDetailPage() {
     await load();
   };
 
+  const closeDeal = async (matchId: string) => {
+    if (!requirementId) return;
+    const ok = window.confirm(
+      "Mark this as a closed deal? The renter/buyer and property will leave matching and Properties."
+    );
+    if (!ok) return;
+    await requirementsApi.closeMatch(requirementId, matchId);
+    await load();
+  };
+
   const hasTenantProfile =
     req &&
     (req.tenant_type ||
@@ -425,6 +435,11 @@ export default function RequirementDetailPage() {
                       onClick={() => shareTenantWithLandlord(m.contact_whatsapp)}
                     >
                       Share profile with landlord
+                    </Button>
+                  )}
+                  {(m.status === "follow_up" || m.status.startsWith("informed")) && (
+                    <Button className="text-sm px-3 py-2" onClick={() => closeDeal(m.id)}>
+                      Deal done
                     </Button>
                   )}
                   <Button className="text-sm px-3 py-2" variant="secondary" onClick={() => rejectMatch(m.id)}>

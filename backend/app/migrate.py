@@ -58,6 +58,8 @@ MIGRATIONS = [
     "ALTER TABLE listings ADD COLUMN IF NOT EXISTS monthly_rent DOUBLE PRECISION",
     "ALTER TABLE listings ADD COLUMN IF NOT EXISTS security_deposit DOUBLE PRECISION",
     "ALTER TABLE lead_requirements ADD COLUMN IF NOT EXISTS listing_id UUID REFERENCES listings(id)",
+    "ALTER TABLE deals ADD COLUMN IF NOT EXISTS listing_id UUID REFERENCES listings(id)",
+    "ALTER TABLE deals ADD COLUMN IF NOT EXISTS requirement_id UUID REFERENCES lead_requirements(id)",
 ]
 
 

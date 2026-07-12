@@ -61,7 +61,7 @@ async def sync_listings_from_supply_leads(db: AsyncSession) -> dict:
         await db.execute(
             select(LeadRequirement).where(
                 LeadRequirement.role.in_(SUPPLY_ROLES),
-                LeadRequirement.status == "active",
+                LeadRequirement.status.in_(["active", "matched"]),
             )
         )
     ).scalars().all()

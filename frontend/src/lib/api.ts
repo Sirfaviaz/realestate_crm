@@ -142,12 +142,28 @@ export type Deal = {
   follow_up_at?: string | null;
 };
 
+export type DashboardClosedDeal = {
+  id: string;
+  stream_type: string;
+  stage: string;
+  contact_id: string;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  listing_id?: string | null;
+  requirement_id?: string | null;
+  requirement_summary?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 export type DashboardData = {
   overdue: DashboardContact[];
   follow_ups_due: DashboardContact[];
+  match_follow_ups?: DashboardMatch[];
   site_visits_today: DashboardContact[];
   hot_leads: DashboardContact[];
   matches_to_inform: DashboardMatch[];
+  closed_deals?: DashboardClosedDeal[];
   role_counts: Record<string, number>;
 };
 
@@ -156,6 +172,9 @@ export type DashboardMatch = {
   requirement_id: string;
   status: string;
   match_score?: number | null;
+  informed_via?: string | null;
+  informed_at?: string | null;
+  follow_up_at?: string | null;
   contact_name?: string | null;
   contact_phone?: string | null;
   contact_whatsapp?: string | null;
@@ -613,6 +632,11 @@ export const requirementsApi = {
     api<RequirementMatch>(`/requirements/${requirementId}/matches/${matchId}`, {
       method: "PATCH",
       body: JSON.stringify({ status, notes }),
+    }),
+  closeMatch: (requirementId: string, matchId: string, notes?: string) =>
+    api<RequirementMatch>(`/requirements/${requirementId}/matches/${matchId}/close`, {
+      method: "POST",
+      body: JSON.stringify({ notes }),
     }),
   pendingMatches: () => api<RequirementMatch[]>("/matches/pending"),
 };

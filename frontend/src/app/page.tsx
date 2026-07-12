@@ -2,8 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, Calendar, Flame, Plus, Sparkles } from "lucide-react";
-import { dashboardApi, type DashboardContact, type DashboardMatch } from "@/lib/api";
+import { AlertCircle, Calendar, CheckCircle2, Flame, Plus, Sparkles } from "lucide-react";
+import {
+  dashboardApi,
+  type DashboardClosedDeal,
+  type DashboardContact,
+  type DashboardMatch,
+} from "@/lib/api";
 import { roleLabel } from "@/lib/contact-roles";
 import { formatPrice } from "@/lib/utils";
 import { formatVisitTime, whatsappLink } from "@/lib/whatsapp";
@@ -34,6 +39,9 @@ export default function HomePage() {
     );
   }
 
+  const matchFollowUps = data.match_follow_ups ?? [];
+  const closedDeals = data.closed_deals ?? [];
+
   return (
     <AppShell>
       <h1 className="mb-1 text-2xl font-bold text-slate-900">Today</h1>
@@ -62,6 +70,21 @@ export default function HomePage() {
       </Section>
 
       <Section
+        title="Follow-ups due"
+        icon={<Calendar className="h-4 w-4 text-amber-500" />}
+        badge={matchFollowUps.length + data.follow_ups_due.length}
+        badgeClass="bg-amber-100 text-amber-700"
+        empty="Nothing due in the next 48 hours"
+      >
+        {matchFollowUps.map((m) => (
+          <MatchFollowUpCard key={`mfu-${m.id}`} match={m} />
+        ))}
+        {data.follow_ups_due.map((c) => (
+          <ContactCard key={c.id} contact={c} />
+        ))}
+      </Section>
+
+      <Section
         title="Overdue"
         icon={<AlertCircle className="h-4 w-4 text-red-500" />}
         badge={data.overdue.length}
@@ -74,18 +97,6 @@ export default function HomePage() {
       </Section>
 
       <Section
-        title="Follow-ups due"
-        icon={<Calendar className="h-4 w-4 text-amber-500" />}
-        badge={data.follow_ups_due.length}
-        badgeClass="bg-amber-100 text-amber-700"
-        empty="Nothing due in the next 24 hours"
-      >
-        {data.follow_ups_due.map((c) => (
-          <ContactCard key={c.id} contact={c} />
-        ))}
-      </Section>
-
-      <Section
         title="Site visits today"
         icon={<Calendar className="h-4 w-4 text-blue-500" />}
         badge={data.site_visits_today.length}
@@ -94,6 +105,18 @@ export default function HomePage() {
       >
         {data.site_visits_today.map((c) => (
           <ContactCard key={c.id} contact={c} showVisit />
+        ))}
+      </Section>
+
+      <Section
+        title="Closed deals"
+        icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+        badge={closedDeals.length}
+        badgeClass="bg-emerald-100 text-emerald-700"
+        empty="No closed deals yet — tap Deal done on a match after they take the home"
+      >
+        {closedDeals.map((d) => (
+          <ClosedDealCard key={d.id} deal={d} />
         ))}
       </Section>
 
@@ -180,6 +203,11 @@ function ContactCard({
               {contact.site_visit_location ? ` · ${contact.site_visit_location}` : ""}
             </div>
           )}
+          {contact.follow_up_at && !showVisit && (
+            <div className="mt-1 text-xs text-amber-700">
+              Follow-up {new Date(contact.follow_up_at).toLocaleString()}
+            </div>
+          )}
           <div className="mt-1 flex gap-1">
             {contact.roles.map((r) => (
               <Badge key={r}>{roleLabel(r)}</Badge>
@@ -234,5 +262,47 @@ function MatchCard({ match }: { match: DashboardMatch }) {
         </div>
       </Card>
     </Link>
+  );
+}
+
+function MatchFollowUpCard({ match }: { match: DashboardMatch }) {
+  return (
+    <Link href={`/leads/${match.requirement_id}`}>
+      <Card className="border-amber-200 bg-amber-50/60 hover:border-amber-300">
+        <div className="font-semibold">{match.contact_name}</div>
+        <div className="text-xs text-amber-800">
+          Follow up
+          {match.follow_up_at ? ` · ${new Date(match.follow_up_at).toLocaleString()}` : ""}
+          {match.informed_via ? ` · after ${match.informed_via}` : ""}
+        </div>
+        {match.matched_name && (
+          <div className="mt-1 text-sm text-slate-700">About: {match.matched_name}</div>
+        )}
+        {match.title && <div className="text-sm text-slate-600">{match.title}</div>}
+      </Card>
+    </Link>
+  );
+}
+
+function ClosedDealCard({ deal }: { deal: DashboardClosedDeal }) {
+  return (
+    <Card className="border-emerald-200 bg-emerald-50/50">
+      <div className="font-semibold">{deal.contact_name || "Deal"}</div>
+      <div className="text-sm text-slate-700">{deal.requirement_summary || "Closed deal"}</div>
+      <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+        <Badge className="capitalize">{deal.stream_type}</Badge>
+        {deal.updated_at && <span>{new Date(deal.updated_at).toLocaleDateString()}</span>}
+        {deal.listing_id && (
+          <Link href={`/listings/${deal.listing_id}`} className="text-emerald-700 underline" onClick={(e) => e.stopPropagation()}>
+            Property
+          </Link>
+        )}
+        {deal.requirement_id && (
+          <Link href={`/leads/${deal.requirement_id}`} className="text-emerald-700 underline" onClick={(e) => e.stopPropagation()}>
+            Lead
+          </Link>
+        )}
+      </div>
+    </Card>
   );
 }
