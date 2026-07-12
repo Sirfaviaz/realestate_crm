@@ -172,9 +172,16 @@ export default function RequirementDetailPage() {
           {req.property_types?.length ? (
             <div>Types: {req.property_types.map((t) => PROPERTY_TYPES.find((p) => p.value === t)?.label || t).join(", ")}</div>
           ) : null}
-          {req.preferred_locations?.length ? <div>Locations: {req.preferred_locations.join(", ")}</div> : null}
-          {req.location_anchors?.length ? (
-            <div>Search areas: {req.location_anchors.map((a) => a.name).filter(Boolean).join(", ")}</div>
+          {(req.preferred_locations?.length || req.location_anchors?.length) ? (
+            <div>
+              Preferred areas:{" "}
+              {(req.preferred_locations?.length
+                ? req.preferred_locations
+                : (req.location_anchors || []).map((a) => a.name).filter(Boolean)
+              )
+                .map((loc, i) => `${i + 1}. ${loc}`)
+                .join(" · ")}
+            </div>
           ) : null}
           {req.city && <div>City: {req.city}</div>}
           {req.search_radius_km != null && (

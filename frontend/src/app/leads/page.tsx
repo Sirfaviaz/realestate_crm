@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronUp, Plus, Search, X } from "lucide-react";
 import { contactsApi, mediaUrl, requirementsApi, type AvailableNowResponse, type Contact, type LeadRequirement, type LocationAnchor } from "@/lib/api";
 import {
   CONTACT_TYPES,
@@ -47,7 +47,6 @@ export default function LeadsPage() {
   const [role, setRole] = useState<ContactRoleKey | null>(null);
   const [reqForm, setReqForm] = useState({
     property_types: [] as string[],
-    locations: "",
     city: "",
     search_radius_km: 5,
     bhk: "",
@@ -111,12 +110,28 @@ export default function LeadsPage() {
 
   const addLocationAnchor = (place: { area: string; city: string; latitude?: number; longitude?: number }) => {
     if (place.latitude == null || place.longitude == null) return;
-    const name = [place.area, place.city].filter(Boolean).join(", ");
+    const name = place.area || place.city;
+    if (!name) return;
     setLocationAnchors((prev) => {
       if (prev.some((a) => a.lat === place.latitude && a.lng === place.longitude)) return prev;
       return [...prev, { name, lat: place.latitude!, lng: place.longitude! }];
     });
     if (!reqForm.city && place.city) setReqForm((f) => ({ ...f, city: place.city }));
+  };
+
+  const removeLocationAnchor = (index: number) => {
+    setLocationAnchors((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const moveLocationAnchor = (index: number, direction: -1 | 1) => {
+    setLocationAnchors((prev) => {
+      const next = index + direction;
+      if (next < 0 || next >= prev.length) return prev;
+      const copy = [...prev];
+      const [item] = copy.splice(index, 1);
+      copy.splice(next, 0, item);
+      return copy;
+    });
   };
 
   const onCitySelect = (place: { city: string; area: string; latitude?: number; longitude?: number }) => {
@@ -163,26 +178,15 @@ export default function LeadsPage() {
           ...tenantPayload,
         });
       }
-      const anchors = [...locationAnchors];
-      if (tenantForm.workplace_lat != null && tenantForm.workplace_lng != null) {
-        const wp = {
-          name: tenantForm.workplace_text || "Workplace",
-          lat: tenantForm.workplace_lat,
-          lng: tenantForm.workplace_lng,
-        };
-        if (!anchors.some((a) => a.lat === wp.lat && a.lng === wp.lng)) {
-          anchors.unshift(wp);
-        }
-      }
       const req = await requirementsApi.create({
         contact_id: contactId,
         role,
         stream_type: meta.stream,
         property_types: reqForm.property_types.length ? reqForm.property_types : undefined,
-        preferred_locations: reqForm.locations
-          ? reqForm.locations.split(",").map((x) => x.trim()).filter(Boolean)
+        preferred_locations: locationAnchors.length
+          ? locationAnchors.map((a) => a.name)
           : undefined,
-        location_anchors: anchors.length ? anchors : undefined,
+        location_anchors: locationAnchors.length ? locationAnchors : undefined,
         city: reqForm.city || undefined,
         search_radius_km: reqForm.search_radius_km,
         bhk: reqForm.bhk || undefined,
@@ -209,7 +213,6 @@ export default function LeadsPage() {
     setRole(null);
     setReqForm({
       property_types: [],
-      locations: "",
       city: "",
       search_radius_km: 5,
       bhk: "",
@@ -432,9 +435,7 @@ export default function LeadsPage() {
           <div>
             <div className="mb-2 text-sm font-medium">Preferred areas</div>
             <p className="mb-2 text-xs text-slate-500">
-              {cityCenter
-                ? `Suggestions prioritize places in/near ${reqForm.city || "the selected city"}.`
-                : "Select a city above to prioritize nearby areas."}
+              Add in priority order (1 = most preferred). Use arrows to reorder.
             </p>
             <GooglePlacesInput
               mode="area"
@@ -445,18 +446,47 @@ export default function LeadsPage() {
               className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
             />
             {locationAnchors.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {locationAnchors.map((a) => (
-                  <Badge key={`${a.lat}-${a.lng}`}>{a.name}</Badge>
+              <ul className="mt-2 space-y-2">
+                {locationAnchors.map((a, index) => (
+                  <li
+                    key={`${a.lat}-${a.lng}-${a.name}`}
+                    className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 text-sm font-medium text-emerald-900">{a.name}</span>
+                    <button
+                      type="button"
+                      aria-label="Move up"
+                      disabled={index === 0}
+                      onClick={() => moveLocationAnchor(index, -1)}
+                      className="rounded-lg p-1.5 text-emerald-800 disabled:opacity-30"
+                    >
+                      <ChevronUp className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Move down"
+                      disabled={index === locationAnchors.length - 1}
+                      onClick={() => moveLocationAnchor(index, 1)}
+                      className="rounded-lg p-1.5 text-emerald-800 disabled:opacity-30"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${a.name}`}
+                      onClick={() => removeLocationAnchor(index)}
+                      className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-red-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
           </div>
-          <Input
-            placeholder="More areas (comma separated)"
-            value={reqForm.locations}
-            onChange={(e) => setReqForm({ ...reqForm, locations: e.target.value })}
-          />
           {(role === "renter" || role === "buyer") && (
             <>
               <div className="border-t border-slate-100 pt-3">
