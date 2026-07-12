@@ -496,7 +496,17 @@ export default function InventoryAdminPage() {
               <div className="space-y-2">
                 <Input placeholder="Name *" value={ownerForm.name} onChange={(e) => setOwnerForm({ ...ownerForm, name: e.target.value })} />
                 <Input placeholder="Phone *" value={ownerForm.phone} onChange={(e) => setOwnerForm({ ...ownerForm, phone: e.target.value })} />
-                <Input placeholder="WhatsApp" value={ownerForm.whatsapp} onChange={(e) => setOwnerForm({ ...ownerForm, whatsapp: e.target.value })} />
+                <div className="space-y-2">
+                  <Input placeholder="WhatsApp" value={ownerForm.whatsapp} onChange={(e) => setOwnerForm({ ...ownerForm, whatsapp: e.target.value })} />
+                  <button
+                    type="button"
+                    disabled={!ownerForm.phone.trim()}
+                    onClick={() => setOwnerForm((f) => ({ ...f, whatsapp: f.phone }))}
+                    className="text-sm font-medium text-emerald-700 disabled:text-slate-400"
+                  >
+                    Same as phone
+                  </button>
+                </div>
                 <Input placeholder="Email" type="email" value={ownerForm.email} onChange={(e) => setOwnerForm({ ...ownerForm, email: e.target.value })} />
               </div>
             )}

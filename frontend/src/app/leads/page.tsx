@@ -327,7 +327,21 @@ export default function LeadsPage() {
           <p className="text-sm text-slate-600">Enter person details or pick an existing contact.</p>
           <Input placeholder="Name *" value={personForm.name} onChange={(e) => setPersonForm({ ...personForm, name: e.target.value, existingId: "" })} />
           <Input placeholder="Phone *" value={personForm.phone} onChange={(e) => setPersonForm({ ...personForm, phone: e.target.value, existingId: "" })} />
-          <Input placeholder="WhatsApp (optional)" value={personForm.whatsapp} onChange={(e) => setPersonForm({ ...personForm, whatsapp: e.target.value })} />
+          <div className="space-y-2">
+            <Input
+              placeholder="WhatsApp (optional)"
+              value={personForm.whatsapp}
+              onChange={(e) => setPersonForm({ ...personForm, whatsapp: e.target.value })}
+            />
+            <button
+              type="button"
+              disabled={!personForm.phone.trim()}
+              onClick={() => setPersonForm((f) => ({ ...f, whatsapp: f.phone }))}
+              className="text-sm font-medium text-emerald-700 disabled:text-slate-400"
+            >
+              Same as phone
+            </button>
+          </div>
           <Button variant="outline" className="w-full" onClick={() => loadContacts()}>Search existing</Button>
           {contacts.length > 0 && (
             <div className="max-h-40 space-y-1 overflow-y-auto">

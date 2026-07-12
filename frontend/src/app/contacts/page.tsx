@@ -117,7 +117,17 @@ export default function ContactsPage() {
         <Card className="mb-4 space-y-3">
           <Input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <Input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          <Input placeholder="WhatsApp" value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
+          <div className="space-y-2">
+            <Input placeholder="WhatsApp" value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
+            <button
+              type="button"
+              disabled={!form.phone.trim()}
+              onClick={() => setForm((f) => ({ ...f, whatsapp: f.phone }))}
+              className="text-sm font-medium text-emerald-700 disabled:text-slate-400"
+            >
+              Same as phone
+            </button>
+          </div>
           <Input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           <select
             className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
