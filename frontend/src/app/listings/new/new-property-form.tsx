@@ -34,6 +34,8 @@ export default function NewPropertyPage() {
   const [owners, setOwners] = useState<Contact[]>([]);
   const [ownerQuery, setOwnerQuery] = useState("");
   const [contactId, setContactId] = useState(presetContactId);
+  const [lockedOwner, setLockedOwner] = useState<Contact | null>(null);
+  const [ownerLocked, setOwnerLocked] = useState(Boolean(presetContactId));
   const [ownerForm, setOwnerForm] = useState({ name: "", phone: "", whatsapp: "" });
   const [form, setForm] = useState({
     title: "",
@@ -53,26 +55,29 @@ export default function NewPropertyPage() {
   const [mediaBusy, setMediaBusy] = useState(false);
   const [mediaStatus, setMediaStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadingOwners, setLoadingOwners] = useState(true);
+  const [loadingOwners, setLoadingOwners] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const role = stream === "sales" ? "seller" : "landlord";
 
   useEffect(() => {
+    if (ownerLocked) return;
     setLoadingOwners(true);
     contactsApi
       .list(ownerQuery || undefined, stream, role)
       .then(setOwners)
       .finally(() => setLoadingOwners(false));
-  }, [ownerQuery, stream, role]);
+  }, [ownerQuery, stream, role, ownerLocked]);
 
   useEffect(() => {
     if (!presetContactId) return;
+    setOwnerLocked(true);
+    setContactId(presetContactId);
+    setOwnerMode("existing");
     contactsApi.list().then((all) => {
       const found = all.find((c) => c.id === presetContactId);
       if (found) {
-        setContactId(found.id);
-        setOwnerMode("existing");
+        setLockedOwner(found);
         if (!presetStream) {
           setStream(found.stream_type === "sales" ? "sales" : "rental");
         }
@@ -81,8 +86,8 @@ export default function NewPropertyPage() {
   }, [presetContactId, presetStream]);
 
   const selectedOwner = useMemo(
-    () => owners.find((o) => o.id === contactId) || null,
-    [owners, contactId]
+    () => lockedOwner || owners.find((o) => o.id === contactId) || null,
+    [lockedOwner, owners, contactId]
   );
 
   const onPlace = (p: {
@@ -252,7 +257,9 @@ export default function NewPropertyPage() {
       </Link>
       <h1 className="mb-1 text-2xl font-bold">Add property</h1>
       <p className="mb-4 text-sm text-slate-600">
-        Link to an existing landlord/seller to keep multiple properties under one person.
+        {ownerLocked && selectedOwner
+          ? `Adding another property for ${selectedOwner.name}.`
+          : "Link to an existing landlord/seller to keep multiple properties under one person."}
       </p>
 
       <Card className="mb-4 space-y-3">
@@ -269,7 +276,7 @@ export default function NewPropertyPage() {
               type="button"
               onClick={() => {
                 setStream(s.value);
-                setContactId("");
+                if (!ownerLocked) setContactId("");
               }}
               className={`min-h-10 flex-1 rounded-xl text-sm font-medium ${stream === s.value ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
             >
@@ -283,85 +290,105 @@ export default function NewPropertyPage() {
         <div className="text-sm font-semibold text-slate-800">
           {stream === "sales" ? "Seller" : "Landlord"}
         </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setOwnerMode("existing")}
-            className={`min-h-10 flex-1 rounded-xl text-sm font-medium ${ownerMode === "existing" ? "bg-slate-800 text-white" : "bg-slate-100"}`}
-          >
-            Existing
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setOwnerMode("new");
-              setContactId("");
-            }}
-            className={`min-h-10 flex-1 rounded-xl text-sm font-medium ${ownerMode === "new" ? "bg-slate-800 text-white" : "bg-slate-100"}`}
-          >
-            New person
-          </button>
-        </div>
 
-        {ownerMode === "existing" ? (
-          <>
-            <Input
-              placeholder="Search by name or phone…"
-              value={ownerQuery}
-              onChange={(e) => setOwnerQuery(e.target.value)}
-            />
-            {selectedOwner && (
-              <div className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                Selected: <span className="font-medium">{selectedOwner.name}</span> · {selectedOwner.phone}
-              </div>
-            )}
-            {loadingOwners ? (
-              <LoadingSpinner />
-            ) : owners.length === 0 ? (
-              <p className="text-sm text-slate-500">No matching owners — create a new person instead.</p>
-            ) : (
-              <div className="max-h-48 space-y-1 overflow-y-auto">
-                {owners.map((c) => (
-                  <ListItem
-                    key={c.id}
-                    title={c.name}
-                    subtitle={c.phone}
-                    active={contactId === c.id}
-                    onClick={() => setContactId(c.id)}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <Input
-              placeholder="Name *"
-              value={ownerForm.name}
-              onChange={(e) => setOwnerForm({ ...ownerForm, name: e.target.value })}
-            />
-            <Input
-              placeholder="Phone * (10 digits)"
-              inputMode="numeric"
-              maxLength={10}
-              value={ownerForm.phone}
-              onChange={(e) => setOwnerForm({ ...ownerForm, phone: digitsOnly(e.target.value) })}
-            />
-            <Input
-              placeholder="WhatsApp (10 digits)"
-              inputMode="numeric"
-              maxLength={10}
-              value={ownerForm.whatsapp}
-              onChange={(e) => setOwnerForm({ ...ownerForm, whatsapp: digitsOnly(e.target.value) })}
-            />
+        {ownerLocked ? (
+          <div className="rounded-xl bg-emerald-50 px-3 py-3 text-sm text-emerald-900">
+            <div className="font-medium">{selectedOwner?.name || "Selected owner"}</div>
+            {selectedOwner?.phone && <div className="text-emerald-800">{selectedOwner.phone}</div>}
             <button
               type="button"
-              disabled={!isValidPhone(ownerForm.phone)}
-              onClick={() => setOwnerForm((f) => ({ ...f, whatsapp: f.phone }))}
-              className="text-sm font-medium text-emerald-700 disabled:text-slate-400"
+              className="mt-2 text-sm font-medium text-emerald-700 underline"
+              onClick={() => {
+                setOwnerLocked(false);
+                setLockedOwner(null);
+              }}
             >
-              Same as phone
+              Choose a different person
             </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setOwnerMode("existing")}
+                className={`min-h-10 flex-1 rounded-xl text-sm font-medium ${ownerMode === "existing" ? "bg-slate-800 text-white" : "bg-slate-100"}`}
+              >
+                Existing
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOwnerMode("new");
+                  setContactId("");
+                }}
+                className={`min-h-10 flex-1 rounded-xl text-sm font-medium ${ownerMode === "new" ? "bg-slate-800 text-white" : "bg-slate-100"}`}
+              >
+                New person
+              </button>
+            </div>
+
+            {ownerMode === "existing" ? (
+              <>
+                <Input
+                  placeholder="Search by name or phone…"
+                  value={ownerQuery}
+                  onChange={(e) => setOwnerQuery(e.target.value)}
+                />
+                {selectedOwner && (
+                  <div className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                    Selected: <span className="font-medium">{selectedOwner.name}</span> · {selectedOwner.phone}
+                  </div>
+                )}
+                {loadingOwners ? (
+                  <LoadingSpinner />
+                ) : owners.length === 0 ? (
+                  <p className="text-sm text-slate-500">No matching owners — create a new person instead.</p>
+                ) : (
+                  <div className="max-h-48 space-y-1 overflow-y-auto">
+                    {owners.map((c) => (
+                      <ListItem
+                        key={c.id}
+                        title={c.name}
+                        subtitle={c.phone}
+                        active={contactId === c.id}
+                        onClick={() => setContactId(c.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <Input
+                  placeholder="Name *"
+                  value={ownerForm.name}
+                  onChange={(e) => setOwnerForm({ ...ownerForm, name: e.target.value })}
+                />
+                <Input
+                  placeholder="Phone * (10 digits)"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={ownerForm.phone}
+                  onChange={(e) => setOwnerForm({ ...ownerForm, phone: digitsOnly(e.target.value) })}
+                />
+                <Input
+                  placeholder="WhatsApp (10 digits)"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={ownerForm.whatsapp}
+                  onChange={(e) => setOwnerForm({ ...ownerForm, whatsapp: digitsOnly(e.target.value) })}
+                />
+                <button
+                  type="button"
+                  disabled={!isValidPhone(ownerForm.phone)}
+                  onClick={() => setOwnerForm((f) => ({ ...f, whatsapp: f.phone }))}
+                  className="text-sm font-medium text-emerald-700 disabled:text-slate-400"
+                >
+                  Same as phone
+                </button>
+              </>
+            )}
           </>
         )}
       </Card>
