@@ -12,6 +12,15 @@ export type WhatsAppContext =
       price?: string;
     }
   | {
+      type: "property_for_renter";
+      name: string;
+      location?: string;
+      bhk?: string;
+      propertyType?: string;
+      price?: string;
+      availableFrom?: string;
+    }
+  | {
       type: "tenant_for_landlord";
       name: string;
       tenantType?: string;
@@ -40,6 +49,20 @@ export function whatsappMessage(ctx: WhatsAppContext): string {
         ctx.price ? `at ${ctx.price}` : null,
       ].filter(Boolean);
       return `Hi ${ctx.name}, we found a property that matches your search: ${parts.join(" ")}. Are you interested?`;
+    }
+    case "property_for_renter": {
+      const parts = [
+        ctx.bhk,
+        ctx.propertyType || "property",
+        ctx.location ? `in ${ctx.location}` : null,
+        ctx.price ? `at ${ctx.price}` : null,
+      ].filter(Boolean);
+      const lines = [
+        `Hi ${ctx.name}, we have a ${parts.join(" ")} that may suit you.`,
+      ];
+      if (ctx.availableFrom) lines.push(`Available from: ${ctx.availableFrom}`);
+      lines.push("Would you like more details or a visit?");
+      return lines.join("\n");
     }
     case "tenant_for_landlord": {
       const lines = [`Hi, I have a prospective tenant for your property:`];

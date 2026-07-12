@@ -30,10 +30,17 @@ export default function RequirementDetailPage() {
   const [followUpMatchId, setFollowUpMatchId] = useState<string | null>(null);
   const [followUpAt, setFollowUpAt] = useState("");
 
-  const load = async () => {
+  const load = async (opts?: { findMatches?: boolean }) => {
     if (!requirementId) return;
     setLoading(true);
     try {
+      if (opts?.findMatches) {
+        try {
+          await requirementsApi.findMatches(requirementId);
+        } catch {
+          // Matching may fail if backend is still updating; still load existing data.
+        }
+      }
       const [r, m, avail] = await Promise.all([
         requirementsApi.get(requirementId),
         requirementsApi.matches(requirementId),
@@ -51,15 +58,20 @@ export default function RequirementDetailPage() {
   };
 
   useEffect(() => {
-    load();
+    load({ findMatches: true });
   }, [requirementId]);
 
   const refreshMatches = async () => {
     if (!requirementId) return;
-    await requirementsApi.findMatches(requirementId);
-    setMatches(await requirementsApi.matches(requirementId));
-    setReq(await requirementsApi.get(requirementId));
-    setAvailable(await requirementsApi.availableNow(requirementId));
+    setLoading(true);
+    try {
+      await requirementsApi.findMatches(requirementId);
+      setMatches(await requirementsApi.matches(requirementId));
+      setReq(await requirementsApi.get(requirementId));
+      setAvailable(await requirementsApi.availableNow(requirementId));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const tenantBudget = (r: LeadRequirement) => {
@@ -90,23 +102,52 @@ export default function RequirementDetailPage() {
   };
 
   const inform = async (match: RequirementMatch, via: "call" | "whatsapp") => {
-    if (!requirementId) return;
-    if (via === "whatsapp" && match.contact_whatsapp) {
-      const priceStr = match.price != null
-        ? formatPrice(match.price, req?.stream_type)
-        : undefined;
-      window.open(
-        whatsappLink(match.contact_whatsapp, {
-          type: "match_found",
-          name: match.contact_name || "there",
-          title: match.title || "property",
-          location: match.location || undefined,
-          bhk: match.bhk || undefined,
-          propertyType: match.property_type || undefined,
-          price: priceStr,
-        }),
-        "_blank"
-      );
+    if (!requirementId || !req) return;
+    const phone = match.contact_whatsapp || match.contact_phone;
+    if (via === "whatsapp" && phone) {
+      const isSupply = req.role === "landlord" || req.role === "seller";
+      if (isSupply) {
+        const priceStr =
+          req.stream_type === "rental" && req.rent_budget != null
+            ? formatPrice(req.rent_budget, "rental")
+            : req.budget_max != null || req.budget_min != null
+              ? formatPrice(req.budget_max || req.budget_min, "sales")
+              : undefined;
+        const locs = req.preferred_locations?.length
+          ? req.preferred_locations.join(", ")
+          : req.city || undefined;
+        window.open(
+          whatsappLink(phone, {
+            type: "property_for_renter",
+            name: match.contact_name || "there",
+            location: locs,
+            bhk: req.bhk || undefined,
+            propertyType: req.property_types?.[0]
+              ? PROPERTY_TYPES.find((p) => p.value === req.property_types![0])?.label || req.property_types[0]
+              : undefined,
+            price: priceStr,
+            availableFrom: req.move_in_date
+              ? new Date(req.move_in_date).toLocaleDateString()
+              : undefined,
+          }),
+          "_blank"
+        );
+      } else {
+        const priceStr =
+          match.price != null ? formatPrice(match.price, req.stream_type) : undefined;
+        window.open(
+          whatsappLink(phone, {
+            type: "match_found",
+            name: match.contact_name || "there",
+            title: match.title || "property",
+            location: match.location || undefined,
+            bhk: match.bhk || undefined,
+            propertyType: match.property_type || undefined,
+            price: priceStr,
+          }),
+          "_blank"
+        );
+      }
     } else if (via === "call" && match.contact_phone) {
       window.location.href = `tel:${match.contact_phone}`;
     }
@@ -307,18 +348,32 @@ export default function RequirementDetailPage() {
               </div>
               {m.status === "new" || m.status.startsWith("informed") ? (
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Button className="text-sm px-3 py-2" variant="outline" onClick={() => inform(m, "call")}>Inform (Call)</Button>
-                  <Button className="text-sm px-3 py-2" onClick={() => inform(m, "whatsapp")}>Inform (WhatsApp)</Button>
-                  {req.stream_type === "rental" && hasTenantProfile && m.contact_whatsapp && (
+                  {(m.contact_phone || m.contact_whatsapp) && (
+                    <Button className="text-sm px-3 py-2" variant="outline" onClick={() => inform(m, "call")}>
+                      Call
+                    </Button>
+                  )}
+                  {(m.contact_whatsapp || m.contact_phone) && (
+                    <Button className="text-sm px-3 py-2" onClick={() => inform(m, "whatsapp")}>
+                      {req.role === "landlord"
+                        ? "WhatsApp renter"
+                        : req.role === "seller"
+                          ? "WhatsApp buyer"
+                          : "WhatsApp"}
+                    </Button>
+                  )}
+                  {req.role === "renter" && hasTenantProfile && m.matched_role === "landlord" && m.contact_whatsapp && (
                     <Button
                       className="text-sm px-3 py-2"
                       variant="secondary"
                       onClick={() => shareTenantWithLandlord(m.contact_whatsapp)}
                     >
-                      Share tenant with landlord
+                      Share profile with landlord
                     </Button>
                   )}
-                  <Button className="text-sm px-3 py-2" variant="secondary" onClick={() => rejectMatch(m.id)}>Not interested</Button>
+                  <Button className="text-sm px-3 py-2" variant="secondary" onClick={() => rejectMatch(m.id)}>
+                    Not interested
+                  </Button>
                 </div>
               ) : null}
             </Card>
