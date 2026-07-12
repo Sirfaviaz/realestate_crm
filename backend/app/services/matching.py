@@ -1,4 +1,4 @@
-"""Match lead requirements against available listings and inventory specs."""
+"""Match lead requirements against available listings, inventory specs, and counterpart leads."""
 
 from __future__ import annotations
 
@@ -10,12 +10,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.contact import Contact
-from app.models.inventory import Location, Project, UnitOption, UnitSpec
+from app.models.inventory import Project, UnitOption, UnitSpec
 from app.models.listing import Listing
 from app.models.requirement import LeadRequirement, RequirementMatch
 from app.services.geo import build_anchors, distance_bucket, haversine_km, min_distance_km, property_coords
 
 BUDGET_TOLERANCE = 0.10
+
+COUNTERPART_ROLE = {
+    "landlord": "renter",
+    "renter": "landlord",
+    "seller": "buyer",
+    "buyer": "seller",
+}
+SUPPLY_ROLES = {"landlord", "seller"}
 
 
 def _norm(s: str | None) -> str:
@@ -82,6 +90,12 @@ def _property_type_match(required: list[str] | None, actual: str | None) -> bool
     return _norm(actual) in [_norm(r) for r in required]
 
 
+def _property_types_overlap(a: list[str] | None, b: list[str] | None) -> bool:
+    if not a or not b:
+        return True
+    return bool({_norm(x) for x in a} & {_norm(x) for x in b})
+
+
 def _budget_match(req: LeadRequirement, price: float | None) -> bool:
     if price is None:
         return True
@@ -100,27 +114,119 @@ def _budget_match(req: LeadRequirement, price: float | None) -> bool:
     return True
 
 
-def _score(req: LeadRequirement, *, bhk_ok: bool, loc_ok: bool, type_ok: bool, budget_ok: bool, dist_km: float | None) -> int:
-    score = 0
-    if bhk_ok:
-        score += 20
-    if loc_ok:
-        score += 25
-    if type_ok:
-        score += 15
-    if budget_ok:
-        score += 20
-    if dist_km is not None:
-        radius = req.search_radius_km or 5.0
-        if dist_km <= radius:
-            score += 20
-        elif dist_km <= 10:
-            score += 10
-        else:
-            score += 5
+def _supply_demand_budget(supply: LeadRequirement, demand: LeadRequirement) -> bool:
+    if supply.stream_type == "rental":
+        asking = supply.rent_budget
+        budget = demand.rent_budget
+        if asking is None or budget is None:
+            return True
+        return budget >= asking * (1 - BUDGET_TOLERANCE)
+    asking = supply.budget_max or supply.budget_min
+    lo = demand.budget_min
+    hi = demand.budget_max
+    if asking is None:
+        return True
+    if lo is None and hi is None:
+        return True
+    if lo is not None and asking < lo * (1 - BUDGET_TOLERANCE):
+        return False
+    if hi is not None and asking > hi * (1 + BUDGET_TOLERANCE):
+        return False
+    return True
+
+
+def _tenant_type_ok(supply: LeadRequirement, demand_contact: Contact) -> bool:
+    preferred = supply.preferred_tenant_types
+    if not preferred:
+        return True
+    tenant_type = demand_contact.tenant_type
+    if not tenant_type:
+        return True
+    return _norm(tenant_type) in {_norm(t) for t in preferred}
+
+
+def _leads_location_ok(
+    a: LeadRequirement,
+    a_contact: Contact,
+    b: LeadRequirement,
+    b_contact: Contact,
+) -> tuple[bool, float | None]:
+    if a.city and b.city and _norm(a.city) == _norm(b.city):
+        return True, None
+
+    a_locs = {_norm(x) for x in (a.preferred_locations or []) if x}
+    b_locs = {_norm(x) for x in (b.preferred_locations or []) if x}
+    if a_locs and b_locs and (a_locs & b_locs):
+        return True, None
+    if a.city and b_locs and _norm(a.city) in b_locs:
+        return True, None
+    if b.city and a_locs and _norm(b.city) in a_locs:
+        return True, None
+
+    a_anchors = build_anchors(a, a_contact)
+    b_anchors = build_anchors(b, b_contact)
+    if a_anchors and b_anchors:
+        dists: list[float] = []
+        for aa in a_anchors:
+            for bb in b_anchors:
+                if aa.get("lat") is None or bb.get("lat") is None:
+                    continue
+                dists.append(haversine_km(aa["lat"], aa["lng"], bb["lat"], bb["lng"]))
+        if dists:
+            dist = min(dists)
+            radius = max(a.search_radius_km or 5.0, b.search_radius_km or 5.0, 10.0)
+            if a.search_radius_km == 0 or b.search_radius_km == 0:
+                return True, dist
+            return dist <= radius, dist
+
+    if a.city and b.city and _norm(a.city) != _norm(b.city):
+        return False, None
+    return True, None
+
+
+def _leads_compatible(
+    left: LeadRequirement,
+    left_contact: Contact,
+    right: LeadRequirement,
+    right_contact: Contact,
+) -> tuple[bool, int, float | None]:
+    if left.stream_type != right.stream_type:
+        return False, 0, None
+    if left.role not in COUNTERPART_ROLE or COUNTERPART_ROLE[left.role] != right.role:
+        return False, 0, None
+
+    if left.role in SUPPLY_ROLES:
+        supply, supply_c, demand, demand_c = left, left_contact, right, right_contact
     else:
+        supply, supply_c, demand, demand_c = right, right_contact, left, left_contact
+
+    if not _property_types_overlap(supply.property_types, demand.property_types):
+        return False, 0, None
+    if supply.bhk and demand.bhk and not _bhk_match(demand.bhk, supply.bhk):
+        return False, 0, None
+    if not _supply_demand_budget(supply, demand):
+        return False, 0, None
+    if supply.role == "landlord" and not _tenant_type_ok(supply, demand_c):
+        return False, 0, None
+
+    loc_ok, dist = _leads_location_ok(supply, supply_c, demand, demand_c)
+    if not loc_ok:
+        return False, 0, dist
+
+    score = 50
+    if supply.bhk and demand.bhk:
+        score += 15
+    if supply.property_types and demand.property_types:
         score += 10
-    return score
+    if supply.stream_type == "rental" and supply.rent_budget and demand.rent_budget:
+        score += 15
+    if dist is not None and dist <= (demand.search_radius_km or 5):
+        score += 20
+    elif dist is not None and dist <= 10:
+        score += 10
+    else:
+        score += 5
+    return True, score, dist
 
 
 def _prop_dict(
@@ -137,6 +243,7 @@ def _prop_dict(
             "source": "listing",
             "listing_id": str(listing.id),
             "spec_id": None,
+            "matched_requirement_id": None,
             "title": listing.title,
             "location": listing.location_text,
             "bhk": listing.bhk,
@@ -157,6 +264,7 @@ def _prop_dict(
         "source": "spec",
         "listing_id": None,
         "spec_id": str(spec.id) if spec else None,
+        "matched_requirement_id": None,
         "title": project.name if project else "Unit",
         "location": f"{location.area}, {location.city}" if location else None,
         "bhk": option.configuration if option else None,
@@ -166,6 +274,43 @@ def _prop_dict(
         "cover_url": None,
         "distance_km": round(dist_km, 1) if dist_km is not None else None,
         "bucket": bucket,
+    }
+
+
+def _lead_match_dict(
+    other: LeadRequirement,
+    other_contact: Contact,
+    *,
+    dist_km: float | None,
+    bucket: str,
+    score: int,
+) -> dict:
+    locs = other.preferred_locations or []
+    location = ", ".join(locs) if locs else other.city
+    price = other.rent_budget if other.stream_type == "rental" else (other.budget_max or other.budget_min)
+    if other.role in SUPPLY_ROLES:
+        title = f"{other_contact.name}'s property"
+    else:
+        title = f"{other_contact.name} looking for {other.bhk or 'property'}"
+    return {
+        "source": "lead",
+        "listing_id": None,
+        "spec_id": None,
+        "matched_requirement_id": str(other.id),
+        "title": title,
+        "location": location,
+        "bhk": other.bhk,
+        "price": price,
+        "property_type": (other.property_types or [None])[0],
+        "stream_type": other.stream_type,
+        "cover_url": None,
+        "distance_km": round(dist_km, 1) if dist_km is not None else None,
+        "bucket": bucket,
+        "match_score": score,
+        "contact_name": other_contact.name,
+        "contact_phone": other_contact.phone,
+        "contact_whatsapp": other_contact.whatsapp or other_contact.phone,
+        "matched_role": other.role,
     }
 
 
@@ -181,11 +326,62 @@ async def _load_req(db: AsyncSession, requirement_id: UUID) -> tuple[LeadRequire
     return req, req.contact
 
 
+async def find_counterpart_leads(db: AsyncSession, requirement_id: UUID) -> dict:
+    loaded = await _load_req(db, requirement_id)
+    if not loaded:
+        return {"within_radius": [], "within_10km": [], "in_city": [], "search_radius_km": 5}
+    req, contact = loaded
+    counterpart = COUNTERPART_ROLE.get(req.role)
+    if not counterpart:
+        return {"within_radius": [], "within_10km": [], "in_city": [], "search_radius_km": 5}
+
+    primary_radius = req.search_radius_km or 5.0
+    buckets: dict[str, list] = {"within_radius": [], "within_10km": [], "in_city": []}
+
+    others = (
+        await db.execute(
+            select(LeadRequirement)
+            .options(selectinload(LeadRequirement.contact))
+            .where(
+                LeadRequirement.role == counterpart,
+                LeadRequirement.stream_type == req.stream_type,
+                LeadRequirement.status.in_(["active", "matched"]),
+                LeadRequirement.id != req.id,
+            )
+        )
+    ).scalars().all()
+
+    for other in others:
+        if not other.contact or other.contact_id == req.contact_id:
+            continue
+        ok, score, dist = _leads_compatible(req, contact, other, other.contact)
+        if not ok:
+            continue
+        bucket = distance_bucket(dist, primary_radius, has_anchors=bool(build_anchors(req, contact)))
+        buckets[bucket].append(
+            _lead_match_dict(other, other.contact, dist_km=dist, bucket=bucket, score=score)
+        )
+
+    for key in buckets:
+        buckets[key].sort(key=lambda x: (x["distance_km"] is None, x["distance_km"] or 999))
+
+    return {
+        **buckets,
+        "search_radius_km": primary_radius,
+        "anchors": build_anchors(req, contact),
+    }
+
+
 async def find_available_properties(db: AsyncSession, requirement_id: UUID) -> dict:
     loaded = await _load_req(db, requirement_id)
     if not loaded:
         return {"within_radius": [], "within_10km": [], "in_city": [], "search_radius_km": 5}
     req, contact = loaded
+
+    # Landlords/sellers match against demand leads, not inventory listings.
+    if req.role in SUPPLY_ROLES:
+        return await find_counterpart_leads(db, requirement_id)
+
     anchors = build_anchors(req, contact)
     primary_radius = req.search_radius_km or 5.0
     buckets: dict[str, list] = {"within_radius": [], "within_10km": [], "in_city": []}
@@ -248,7 +444,10 @@ async def find_available_properties(db: AsyncSession, requirement_id: UUID) -> d
         bucket = distance_bucket(dist, primary_radius, has_anchors=bool(anchors))
         buckets[bucket].append(_prop_dict(spec=spec, dist_km=dist, bucket=bucket))
 
+    # Also include matching supply leads (landlords/sellers).
+    lead_buckets = await find_counterpart_leads(db, requirement_id)
     for key in buckets:
+        buckets[key].extend(lead_buckets.get(key, []))
         buckets[key].sort(key=lambda x: (x["distance_km"] is None, x["distance_km"] or 999))
 
     return {
@@ -264,11 +463,14 @@ async def _upsert_match(
     *,
     listing_id: UUID | None = None,
     spec_id: UUID | None = None,
+    matched_requirement_id: UUID | None = None,
     match_score: int,
 ) -> RequirementMatch | None:
     stmt = select(RequirementMatch).where(RequirementMatch.requirement_id == requirement_id)
     if listing_id:
         stmt = stmt.where(RequirementMatch.listing_id == listing_id)
+    elif matched_requirement_id:
+        stmt = stmt.where(RequirementMatch.matched_requirement_id == matched_requirement_id)
     else:
         stmt = stmt.where(RequirementMatch.spec_id == spec_id)
     existing = (await db.execute(stmt)).scalar_one_or_none()
@@ -281,6 +483,7 @@ async def _upsert_match(
         requirement_id=requirement_id,
         listing_id=listing_id,
         spec_id=spec_id,
+        matched_requirement_id=matched_requirement_id,
         match_score=match_score,
         status="new",
     )
@@ -292,7 +495,7 @@ async def match_requirement(db: AsyncSession, requirement_id: UUID) -> int:
     loaded = await _load_req(db, requirement_id)
     if not loaded:
         return 0
-    req, contact = loaded
+    req, _contact = loaded
     if req.status not in ("active", "matched"):
         return 0
 
@@ -302,12 +505,38 @@ async def match_requirement(db: AsyncSession, requirement_id: UUID) -> int:
         for item in available.get(key, []):
             listing_id = UUID(item["listing_id"]) if item.get("listing_id") else None
             spec_id = UUID(item["spec_id"]) if item.get("spec_id") else None
-            score = 70 if item.get("bucket") == "within_radius" else 60 if item.get("bucket") == "within_10km" else 55
+            matched_req_id = (
+                UUID(item["matched_requirement_id"]) if item.get("matched_requirement_id") else None
+            )
+            score = item.get("match_score") or (
+                70 if item.get("bucket") == "within_radius" else 60 if item.get("bucket") == "within_10km" else 55
+            )
             m = await _upsert_match(
-                db, req.id, listing_id=listing_id, spec_id=spec_id, match_score=score
+                db,
+                req.id,
+                listing_id=listing_id,
+                spec_id=spec_id,
+                matched_requirement_id=matched_req_id,
+                match_score=int(score),
             )
             if m and m.status == "new":
                 created += 1
+
+            # Mirror lead↔lead matches onto the counterpart requirement.
+            if matched_req_id:
+                reverse = await _upsert_match(
+                    db,
+                    matched_req_id,
+                    matched_requirement_id=req.id,
+                    match_score=int(score),
+                )
+                if reverse and reverse.status == "new":
+                    created += 1
+                other = (
+                    await db.execute(select(LeadRequirement).where(LeadRequirement.id == matched_req_id))
+                ).scalar_one_or_none()
+                if other and other.status == "active":
+                    other.status = "matched"
 
     if created > 0 and req.status == "active":
         req.status = "matched"

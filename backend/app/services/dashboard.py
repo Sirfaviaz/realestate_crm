@@ -28,7 +28,28 @@ def _contact_dict(c: Contact) -> dict:
 
 def _match_dict(m: RequirementMatch) -> dict:
     info = {"title": None, "location": None, "bhk": None, "price": None, "property_type": None}
-    if m.listing:
+    contact = None
+    matched_role = None
+    if m.matched_requirement and m.matched_requirement.contact:
+        other = m.matched_requirement
+        c = other.contact
+        locs = other.preferred_locations or []
+        location = ", ".join(locs) if locs else other.city
+        price = other.rent_budget if other.stream_type == "rental" else (other.budget_max or other.budget_min)
+        if other.role in ("landlord", "seller"):
+            title = f"{c.name}'s property"
+        else:
+            title = f"{c.name} looking for {other.bhk or 'property'}"
+        info = {
+            "title": title,
+            "location": location,
+            "bhk": other.bhk,
+            "price": price,
+            "property_type": (other.property_types or [None])[0],
+        }
+        contact = c
+        matched_role = other.role
+    elif m.listing:
         info = {
             "title": m.listing.title,
             "location": m.listing.location_text,
@@ -36,6 +57,7 @@ def _match_dict(m: RequirementMatch) -> dict:
             "price": m.listing.price,
             "property_type": m.listing.property_type,
         }
+        contact = m.listing.contact
     elif m.spec and m.spec.option:
         spec = m.spec
         opt = spec.option
@@ -47,7 +69,8 @@ def _match_dict(m: RequirementMatch) -> dict:
             "bhk": opt.configuration,
             "price": spec.rent_price or spec.sale_price,
         }
-    contact = m.requirement.contact if m.requirement else None
+    if contact is None and m.requirement:
+        contact = m.requirement.contact
     return {
         "id": str(m.id),
         "requirement_id": str(m.requirement_id),
@@ -57,6 +80,7 @@ def _match_dict(m: RequirementMatch) -> dict:
         "contact_phone": contact.phone if contact else None,
         "contact_whatsapp": (contact.whatsapp or contact.phone) if contact else None,
         "requirement_role": m.requirement.role if m.requirement else None,
+        "matched_role": matched_role,
         **info,
     }
 
@@ -109,9 +133,10 @@ async def get_dashboard(db: AsyncSession, user_id: UUID | None = None) -> dict:
     match_stmt = (
         select(RequirementMatch)
         .options(
-            selectinload(RequirementMatch.listing),
+            selectinload(RequirementMatch.listing).selectinload(Listing.contact),
             selectinload(RequirementMatch.spec).selectinload(UnitSpec.option).selectinload(UnitOption.project).selectinload(Project.location),
             selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
+            selectinload(RequirementMatch.matched_requirement).selectinload(LeadRequirement.contact),
         )
         .where(RequirementMatch.status == "new")
         .order_by(RequirementMatch.created_at.desc())

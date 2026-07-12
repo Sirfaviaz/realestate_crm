@@ -54,7 +54,7 @@ export default function HomePage() {
         icon={<Sparkles className="h-4 w-4 text-violet-500" />}
         badge={data.matches_to_inform?.length ?? 0}
         badgeClass="bg-violet-100 text-violet-700"
-        empty="No new property matches to share"
+        empty="No new matches to share"
       >
         {(data.matches_to_inform ?? []).map((m) => (
           <MatchCard key={m.id} match={m} />
@@ -212,6 +212,7 @@ function MatchCard({ match }: { match: DashboardMatch }) {
         )}
         <div className="mt-1 flex gap-1">
           {match.requirement_role && <Badge>{roleLabel(match.requirement_role)}</Badge>}
+          {match.matched_role && <Badge>{roleLabel(match.matched_role)}</Badge>}
           {match.bhk && <Badge>{match.bhk}</Badge>}
         </div>
       </Card>

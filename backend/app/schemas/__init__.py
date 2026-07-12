@@ -378,6 +378,7 @@ class RequirementMatchResponse(BaseModel):
     requirement_id: UUID
     listing_id: UUID | None = None
     spec_id: UUID | None = None
+    matched_requirement_id: UUID | None = None
     match_score: int | None = None
     status: str
     informed_at: datetime | None = None
@@ -394,6 +395,7 @@ class RequirementMatchResponse(BaseModel):
     contact_phone: str | None = None
     contact_whatsapp: str | None = None
     requirement_role: str | None = None
+    matched_role: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

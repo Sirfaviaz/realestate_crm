@@ -27,6 +27,17 @@ from app.services.matching import find_available_properties, match_requirement
 router = APIRouter(prefix="/requirements", tags=["requirements"])
 matches_router = APIRouter(prefix="/matches", tags=["matches"])
 
+_MATCH_LOAD = (
+    selectinload(RequirementMatch.listing).selectinload(Listing.media),
+    selectinload(RequirementMatch.listing).selectinload(Listing.contact),
+    selectinload(RequirementMatch.spec)
+    .selectinload(UnitSpec.option)
+    .selectinload(UnitOption.project)
+    .selectinload(Project.location),
+    selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
+    selectinload(RequirementMatch.matched_requirement).selectinload(LeadRequirement.contact),
+)
+
 
 def _req_response(req: LeadRequirement) -> LeadRequirementResponse:
     data = LeadRequirementResponse.model_validate(req)
@@ -44,7 +55,34 @@ def _req_response(req: LeadRequirement) -> LeadRequirementResponse:
 
 
 def _match_property_info(match: RequirementMatch) -> dict:
-    info: dict = {"title": None, "location": None, "bhk": None, "price": None, "property_type": None, "cover_url": None}
+    info: dict = {
+        "title": None,
+        "location": None,
+        "bhk": None,
+        "price": None,
+        "property_type": None,
+        "cover_url": None,
+        "matched_role": None,
+    }
+    if match.matched_requirement and match.matched_requirement.contact:
+        other = match.matched_requirement
+        c = other.contact
+        locs = other.preferred_locations or []
+        location = ", ".join(locs) if locs else other.city
+        price = other.rent_budget if other.stream_type == "rental" else (other.budget_max or other.budget_min)
+        if other.role in ("landlord", "seller"):
+            title = f"{c.name}'s property"
+        else:
+            title = f"{c.name} looking for {other.bhk or 'property'}"
+        info.update(
+            title=title,
+            location=location,
+            bhk=other.bhk,
+            price=price,
+            property_type=(other.property_types or [None])[0],
+            matched_role=other.role,
+        )
+        return info
     if match.listing:
         l = match.listing
         info.update(
@@ -74,11 +112,23 @@ def _match_response(match: RequirementMatch) -> RequirementMatchResponse:
     info = _match_property_info(match)
     for k, v in info.items():
         setattr(data, k, v)
-    if match.requirement and match.requirement.contact:
+    # Contact to inform = counterpart lead (or listing owner), not always the parent requirement.
+    if match.matched_requirement and match.matched_requirement.contact:
+        c = match.matched_requirement.contact
+        data.contact_name = c.name
+        data.contact_phone = c.phone
+        data.contact_whatsapp = c.whatsapp or c.phone
+    elif match.listing and match.listing.contact:
+        c = match.listing.contact
+        data.contact_name = c.name
+        data.contact_phone = c.phone
+        data.contact_whatsapp = c.whatsapp or c.phone
+    elif match.requirement and match.requirement.contact:
         c = match.requirement.contact
         data.contact_name = c.name
         data.contact_phone = c.phone
         data.contact_whatsapp = c.whatsapp or c.phone
+    if match.requirement:
         data.requirement_role = match.requirement.role
     return data
 
@@ -212,11 +262,7 @@ async def list_matches(
 ):
     result = await db.execute(
         select(RequirementMatch)
-        .options(
-            selectinload(RequirementMatch.listing).selectinload(Listing.media),
-            selectinload(RequirementMatch.spec).selectinload(UnitSpec.option).selectinload(UnitOption.project).selectinload(Project.location),
-            selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
-        )
+        .options(*_MATCH_LOAD)
         .where(RequirementMatch.requirement_id == requirement_id)
         .order_by(RequirementMatch.match_score.desc().nullslast(), RequirementMatch.created_at.desc())
     )
@@ -233,11 +279,7 @@ async def inform_match(
 ):
     result = await db.execute(
         select(RequirementMatch)
-        .options(
-            selectinload(RequirementMatch.listing).selectinload(Listing.media),
-            selectinload(RequirementMatch.spec).selectinload(UnitSpec.option).selectinload(UnitOption.project).selectinload(Project.location),
-            selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
-        )
+        .options(*_MATCH_LOAD)
         .where(RequirementMatch.id == match_id, RequirementMatch.requirement_id == requirement_id)
     )
     match = result.scalar_one_or_none()
@@ -276,11 +318,7 @@ async def match_follow_up(
 ):
     result = await db.execute(
         select(RequirementMatch)
-        .options(
-            selectinload(RequirementMatch.listing).selectinload(Listing.media),
-            selectinload(RequirementMatch.spec).selectinload(UnitSpec.option).selectinload(UnitOption.project).selectinload(Project.location),
-            selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
-        )
+        .options(*_MATCH_LOAD)
         .where(RequirementMatch.id == match_id, RequirementMatch.requirement_id == requirement_id)
     )
     match = result.scalar_one_or_none()
@@ -314,11 +352,7 @@ async def update_match_status(
 ):
     result = await db.execute(
         select(RequirementMatch)
-        .options(
-            selectinload(RequirementMatch.listing).selectinload(Listing.media),
-            selectinload(RequirementMatch.spec).selectinload(UnitSpec.option).selectinload(UnitOption.project).selectinload(Project.location),
-            selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
-        )
+        .options(*_MATCH_LOAD)
         .where(RequirementMatch.id == match_id, RequirementMatch.requirement_id == requirement_id)
     )
     match = result.scalar_one_or_none()
@@ -339,11 +373,7 @@ async def pending_matches(
 ):
     stmt = (
         select(RequirementMatch)
-        .options(
-            selectinload(RequirementMatch.listing).selectinload(Listing.media),
-            selectinload(RequirementMatch.spec).selectinload(UnitSpec.option).selectinload(UnitOption.project).selectinload(Project.location),
-            selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
-        )
+        .options(*_MATCH_LOAD)
         .where(RequirementMatch.status == "new")
         .order_by(RequirementMatch.created_at.desc())
         .limit(50)

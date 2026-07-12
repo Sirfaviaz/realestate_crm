@@ -42,7 +42,9 @@ class LeadRequirement(Base):
 
     contact: Mapped["Contact"] = relationship(back_populates="requirements")
     matches: Mapped[list["RequirementMatch"]] = relationship(
-        back_populates="requirement", cascade="all, delete-orphan"
+        back_populates="requirement",
+        cascade="all, delete-orphan",
+        foreign_keys="RequirementMatch.requirement_id",
     )
 
 
@@ -59,6 +61,9 @@ class RequirementMatch(Base):
     spec_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("unit_specs.id"), nullable=True, index=True
     )
+    matched_requirement_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("lead_requirements.id"), nullable=True, index=True
+    )
     match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="new", index=True)
     informed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -70,6 +75,11 @@ class RequirementMatch(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    requirement: Mapped["LeadRequirement"] = relationship(back_populates="matches")
+    requirement: Mapped["LeadRequirement"] = relationship(
+        back_populates="matches", foreign_keys=[requirement_id]
+    )
+    matched_requirement: Mapped["LeadRequirement | None"] = relationship(
+        foreign_keys=[matched_requirement_id]
+    )
     listing: Mapped["Listing | None"] = relationship()
     spec: Mapped["UnitSpec | None"] = relationship()

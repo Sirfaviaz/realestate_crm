@@ -34,6 +34,7 @@ MIGRATIONS = [
     "ALTER TABLE lead_requirements ADD COLUMN IF NOT EXISTS city VARCHAR(128)",
     "ALTER TABLE lead_requirements ADD COLUMN IF NOT EXISTS search_radius_km DOUBLE PRECISION DEFAULT 5",
     "ALTER TABLE lead_requirements ADD COLUMN IF NOT EXISTS preferred_tenant_types VARCHAR[]",
+    "ALTER TABLE requirement_matches ADD COLUMN IF NOT EXISTS matched_requirement_id UUID REFERENCES lead_requirements(id)",
     "ALTER TABLE listings ADD COLUMN IF NOT EXISTS builder_name VARCHAR(255)",
     "ALTER TABLE listings ADD COLUMN IF NOT EXISTS project_name VARCHAR(255)",
     "ALTER TABLE listings ADD COLUMN IF NOT EXISTS land_area_cent DOUBLE PRECISION",

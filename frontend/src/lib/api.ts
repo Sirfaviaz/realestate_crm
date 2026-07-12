@@ -160,6 +160,7 @@ export type DashboardMatch = {
   contact_phone?: string | null;
   contact_whatsapp?: string | null;
   requirement_role?: string | null;
+  matched_role?: string | null;
   title?: string | null;
   location?: string | null;
   bhk?: string | null;
@@ -204,6 +205,7 @@ export type RequirementMatch = {
   requirement_id: string;
   listing_id?: string | null;
   spec_id?: string | null;
+  matched_requirement_id?: string | null;
   match_score?: number | null;
   status: string;
   informed_at?: string | null;
@@ -220,6 +222,7 @@ export type RequirementMatch = {
   contact_phone?: string | null;
   contact_whatsapp?: string | null;
   requirement_role?: string | null;
+  matched_role?: string | null;
   created_at: string;
 };
 

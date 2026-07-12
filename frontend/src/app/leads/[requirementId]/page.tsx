@@ -262,14 +262,29 @@ export default function RequirementDetailPage() {
         )}
 
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-semibold">Matches ({matches.length})</h2>
+        <h2 className="font-semibold">
+          Matches ({matches.length})
+          {req.role === "landlord"
+            ? " — renters"
+            : req.role === "seller"
+              ? " — buyers"
+              : ""}
+        </h2>
         <button type="button" onClick={refreshMatches} className="flex items-center gap-1 text-sm text-emerald-600">
           <RefreshCw className="h-4 w-4" /> Find matches
         </button>
       </div>
 
       {matches.length === 0 ? (
-        <EmptyState message="No matches yet. Add listings or inventory, then tap Find matches." />
+        <EmptyState
+          message={
+            req.role === "landlord"
+              ? "No matching renters yet. Create a renter lead in the same city/area, then tap Find matches."
+              : req.role === "seller"
+                ? "No matching buyers yet. Create a buyer lead, then tap Find matches."
+                : "No matches yet. Add listings or a landlord/seller lead, then tap Find matches."
+          }
+        />
       ) : (
         <div className="mb-6 space-y-3">
           {matches.map((m) => (
@@ -280,10 +295,11 @@ export default function RequirementDetailPage() {
                   <img src={mediaUrl(m.cover_url) || ""} alt="" className="h-20 w-20 rounded-lg object-cover" />
                 )}
                 <div className="flex-1">
-                  <div className="font-semibold">{m.title || "Property"}</div>
-                  <div className="text-sm text-slate-600">{m.location}</div>
+                  <div className="font-semibold">{m.title || (m.matched_role ? roleLabel(m.matched_role) : "Match")}</div>
+                  <div className="text-sm text-slate-600">{m.contact_name}{m.location ? ` · ${m.location}` : ""}</div>
                   <div className="text-sm font-medium">{formatPrice(m.price, req.stream_type)}</div>
                   <div className="mt-1 flex gap-1">
+                    {m.matched_role && <Badge>{roleLabel(m.matched_role)}</Badge>}
                     {m.bhk && <Badge>{m.bhk}</Badge>}
                     <Badge className="capitalize">{m.status.replace(/_/g, " ")}</Badge>
                   </div>
