@@ -6,29 +6,28 @@ import { useParams } from "next/navigation";
 import { ChevronLeft, Phone, RefreshCw } from "lucide-react";
 import {
   contactsApi,
+  listingsApi,
   mediaUrl,
   requirementsApi,
   type Activity,
-  type AvailableNowResponse,
-  type AvailableProperty,
   type LeadRequirement,
+  type Listing,
   type RequirementMatch,
 } from "@/lib/api";
 import { PROPERTY_TYPES, TENANT_TYPES, roleLabel } from "@/lib/contact-roles";
 import { formatPrice } from "@/lib/utils";
-import { tenantTypeLabel, whatsappLink } from "@/lib/whatsapp";
+import { shareViaWhatsApp, tenantTypeLabel, whatsappLink, whatsappMessage } from "@/lib/whatsapp";
 import { AppShell } from "@/components/app-shell";
-import { Badge, Button, Card, EmptyState, Input, LoadingSpinner } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, LoadingSpinner } from "@/components/ui";
 
 export default function RequirementDetailPage() {
   const { requirementId } = useParams<{ requirementId: string }>();
   const [req, setReq] = useState<LeadRequirement | null>(null);
   const [matches, setMatches] = useState<RequirementMatch[]>([]);
-  const [available, setAvailable] = useState<AvailableNowResponse | null>(null);
+  const [listings, setListings] = useState<Listing[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
-  const [followUpMatchId, setFollowUpMatchId] = useState<string | null>(null);
-  const [followUpAt, setFollowUpAt] = useState("");
+  const [sharing, setSharing] = useState(false);
 
   const load = async (opts?: { findMatches?: boolean }) => {
     if (!requirementId) return;
@@ -41,16 +40,19 @@ export default function RequirementDetailPage() {
           // Matching may fail if backend is still updating; still load existing data.
         }
       }
-      const [r, m, avail] = await Promise.all([
+      const [r, m] = await Promise.all([
         requirementsApi.get(requirementId),
         requirementsApi.matches(requirementId),
-        requirementsApi.availableNow(requirementId),
       ]);
       setReq(r);
       setMatches(m);
-      setAvailable(avail);
       if (r.contact_id) {
         setActivities(await contactsApi.activities(r.contact_id));
+        if (r.role === "landlord" || r.role === "seller") {
+          setListings(await listingsApi.list({ contact_id: r.contact_id }));
+        } else {
+          setListings([]);
+        }
       }
     } finally {
       setLoading(false);
@@ -68,10 +70,58 @@ export default function RequirementDetailPage() {
       await requirementsApi.findMatches(requirementId);
       setMatches(await requirementsApi.matches(requirementId));
       setReq(await requirementsApi.get(requirementId));
-      setAvailable(await requirementsApi.availableNow(requirementId));
     } finally {
       setLoading(false);
     }
+  };
+
+  const propertyListing = listings[0] || null;
+  const propertyImages: string[] = (propertyListing?.media || [])
+    .filter((m) => m.media_type === "image")
+    .map((m) => mediaUrl(m.url) || "")
+    .filter(Boolean);
+  const coverOnly = propertyListing?.cover_url ? mediaUrl(propertyListing.cover_url) : null;
+  if (!propertyImages.length && coverOnly) propertyImages.push(coverOnly);
+
+  const supplySummary = (r: LeadRequirement) => {
+    const locs = r.preferred_locations?.length
+      ? r.preferred_locations.join(", ")
+      : r.city || undefined;
+    const typeLabel = r.property_types?.[0]
+      ? PROPERTY_TYPES.find((p) => p.value === r.property_types![0])?.label || r.property_types[0]
+      : undefined;
+    const priceStr =
+      r.stream_type === "rental" && r.rent_budget != null
+        ? formatPrice(r.rent_budget, "rental")
+        : r.budget_max != null || r.budget_min != null
+          ? formatPrice(r.budget_max || r.budget_min, "sales")
+          : undefined;
+    const deposit =
+      r.security_deposit != null ? formatPrice(r.security_deposit, "sales") : undefined;
+    const maintenance =
+      r.maintenance != null ? formatPrice(r.maintenance, "rental") : undefined;
+    const availableFrom = r.move_in_date
+      ? new Date(r.move_in_date).toLocaleDateString()
+      : undefined;
+    const parts = [
+      r.bhk,
+      typeLabel,
+      locs,
+      priceStr ? `Rent ${priceStr}` : null,
+      deposit ? `Deposit ${deposit}` : null,
+      maintenance ? `Maintenance ${maintenance}` : null,
+      availableFrom ? `Available ${availableFrom}` : null,
+      propertyImages.length ? `${propertyImages.length} photo(s)` : null,
+    ].filter(Boolean);
+    return {
+      locs,
+      typeLabel,
+      priceStr,
+      deposit,
+      maintenance,
+      availableFrom,
+      text: parts.join(" · "),
+    };
   };
 
   const tenantBudget = (r: LeadRequirement) => {
@@ -104,39 +154,40 @@ export default function RequirementDetailPage() {
   const inform = async (match: RequirementMatch, via: "call" | "whatsapp") => {
     if (!requirementId || !req) return;
     const phone = match.contact_whatsapp || match.contact_phone;
+    const isSupply = req.role === "landlord" || req.role === "seller";
+    let sentNotes: string | undefined;
+
     if (via === "whatsapp" && phone) {
-      const isSupply = req.role === "landlord" || req.role === "seller";
-      if (isSupply) {
-        const priceStr =
-          req.stream_type === "rental" && req.rent_budget != null
-            ? formatPrice(req.rent_budget, "rental")
-            : req.budget_max != null || req.budget_min != null
-              ? formatPrice(req.budget_max || req.budget_min, "sales")
-              : undefined;
-        const locs = req.preferred_locations?.length
-          ? req.preferred_locations.join(", ")
-          : req.city || undefined;
-        window.open(
-          whatsappLink(phone, {
+      setSharing(true);
+      try {
+        if (isSupply) {
+          const summary = supplySummary(req);
+          sentNotes = summary.text;
+          const text = whatsappMessage({
             type: "property_for_renter",
             name: match.contact_name || "there",
-            location: locs,
+            location: summary.locs,
             bhk: req.bhk || undefined,
-            propertyType: req.property_types?.[0]
-              ? PROPERTY_TYPES.find((p) => p.value === req.property_types![0])?.label || req.property_types[0]
+            propertyType: summary.typeLabel,
+            price: summary.priceStr,
+            deposit: summary.deposit,
+            maintenance: summary.maintenance,
+            availableFrom: summary.availableFrom,
+            photoNote: propertyImages.length
+              ? `(${propertyImages.length} property photo${propertyImages.length > 1 ? "s" : ""} attached if share sheet supports it — otherwise please attach from gallery)`
               : undefined,
-            price: priceStr,
-            availableFrom: req.move_in_date
-              ? new Date(req.move_in_date).toLocaleDateString()
-              : undefined,
-          }),
-          "_blank"
-        );
-      } else {
-        const priceStr =
-          match.price != null ? formatPrice(match.price, req.stream_type) : undefined;
-        window.open(
-          whatsappLink(phone, {
+          });
+          await shareViaWhatsApp({
+            phone,
+            text,
+            imageUrls: propertyImages,
+          });
+        } else {
+          const priceStr =
+            match.price != null ? formatPrice(match.price, req.stream_type) : undefined;
+          sentNotes = [match.title, match.location, match.bhk, priceStr].filter(Boolean).join(" · ");
+          const cover = match.cover_url ? mediaUrl(match.cover_url) : null;
+          const text = whatsappMessage({
             type: "match_found",
             name: match.contact_name || "there",
             title: match.title || "property",
@@ -144,29 +195,22 @@ export default function RequirementDetailPage() {
             bhk: match.bhk || undefined,
             propertyType: match.property_type || undefined,
             price: priceStr,
-          }),
-          "_blank"
-        );
+          });
+          await shareViaWhatsApp({
+            phone,
+            text,
+            imageUrls: cover ? [cover] : [],
+          });
+        }
+      } finally {
+        setSharing(false);
       }
     } else if (via === "call" && match.contact_phone) {
       window.location.href = `tel:${match.contact_phone}`;
+      sentNotes = isSupply ? supplySummary(req).text : match.title || undefined;
     }
-    await requirementsApi.informMatch(requirementId, match.id, via);
-    await load();
-    if (via === "whatsapp" || via === "call") {
-      setFollowUpMatchId(match.id);
-    }
-  };
 
-  const saveFollowUp = async () => {
-    if (!requirementId || !followUpMatchId || !followUpAt) return;
-    await requirementsApi.followUpMatch(
-      requirementId,
-      followUpMatchId,
-      new Date(followUpAt).toISOString()
-    );
-    setFollowUpMatchId(null);
-    setFollowUpAt("");
+    await requirementsApi.informMatch(requirementId, match.id, via, sentNotes);
     await load();
   };
 
@@ -194,11 +238,6 @@ export default function RequirementDetailPage() {
       </AppShell>
     );
   }
-
-  const radiusLabel =
-    available?.search_radius_km === 0
-      ? "Whole city"
-      : `Within ${available?.search_radius_km || req.search_radius_km || 5} km`;
 
   return (
     <AppShell>
@@ -264,6 +303,14 @@ export default function RequirementDetailPage() {
           )}
           {req.notes && <div className="italic">{req.notes}</div>}
         </div>
+        {(req.role === "landlord" || req.role === "seller") && propertyImages.length > 0 && (
+          <div className="mt-3 flex gap-2 overflow-x-auto">
+            {propertyImages.slice(0, 6).map((url) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={url} src={url} alt="" className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+            ))}
+          </div>
+        )}
         {(req.contact_phone || req.contact_whatsapp) && (
           <div className="mt-3 flex gap-2">
             {req.contact_phone && (
@@ -288,36 +335,6 @@ export default function RequirementDetailPage() {
           </div>
         </Card>
       )}
-
-      {available &&
-        (available.within_radius.length > 0 ||
-          available.within_10km.length > 0 ||
-          available.in_city.length > 0) && (
-          <div className="mb-6">
-            <h2 className="mb-3 font-semibold">Available now</h2>
-            <AvailableSection
-              title={radiusLabel}
-              items={available.within_radius}
-              stream={req.stream_type}
-              req={req}
-              onShareLandlord={shareTenantWithLandlord}
-            />
-            <AvailableSection
-              title="Within 10 km"
-              items={available.within_10km}
-              stream={req.stream_type}
-              req={req}
-              onShareLandlord={shareTenantWithLandlord}
-            />
-            <AvailableSection
-              title={`In ${req.city || "city"}`}
-              items={available.in_city}
-              stream={req.stream_type}
-              req={req}
-              onShareLandlord={shareTenantWithLandlord}
-            />
-          </div>
-        )}
 
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-semibold">
@@ -356,27 +373,49 @@ export default function RequirementDetailPage() {
                   <div className="font-semibold">{m.title || (m.matched_role ? roleLabel(m.matched_role) : "Match")}</div>
                   <div className="text-sm text-slate-600">{m.contact_name}{m.location ? ` · ${m.location}` : ""}</div>
                   <div className="text-sm font-medium">{formatPrice(m.price, req.stream_type)}</div>
-                  <div className="mt-1 flex gap-1">
+                  <div className="mt-1 flex flex-wrap gap-1">
                     {m.matched_role && <Badge>{roleLabel(m.matched_role)}</Badge>}
                     {m.bhk && <Badge>{m.bhk}</Badge>}
                     <Badge className="capitalize">{m.status.replace(/_/g, " ")}</Badge>
                   </div>
                 </div>
               </div>
-              {m.status === "new" || m.status.startsWith("informed") ? (
+
+              {(m.status.startsWith("informed") || m.notes || m.follow_up_at) && (
+                <div className="mt-3 space-y-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  {m.informed_at && (
+                    <div>
+                      Sent via {m.informed_via || "message"} · {new Date(m.informed_at).toLocaleString()}
+                    </div>
+                  )}
+                  {m.notes && <div><span className="font-medium text-slate-800">Property details sent:</span> {m.notes}</div>}
+                  {m.follow_up_at && (
+                    <div className="font-medium text-amber-800">
+                      Follow up {new Date(m.follow_up_at).toLocaleString()}
+                      {(req.role === "landlord" || req.role === "seller") && m.contact_name
+                        ? ` with ${m.contact_name}`
+                        : ""}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {m.status === "new" || m.status.startsWith("informed") || m.status === "follow_up" ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {(m.contact_phone || m.contact_whatsapp) && (
-                    <Button className="text-sm px-3 py-2" variant="outline" onClick={() => inform(m, "call")}>
+                    <Button className="text-sm px-3 py-2" variant="outline" onClick={() => inform(m, "call")} disabled={sharing}>
                       Call
                     </Button>
                   )}
                   {(m.contact_whatsapp || m.contact_phone) && (
-                    <Button className="text-sm px-3 py-2" onClick={() => inform(m, "whatsapp")}>
-                      {req.role === "landlord"
-                        ? "WhatsApp renter"
-                        : req.role === "seller"
-                          ? "WhatsApp buyer"
-                          : "WhatsApp"}
+                    <Button className="text-sm px-3 py-2" onClick={() => inform(m, "whatsapp")} disabled={sharing}>
+                      {sharing
+                        ? "Opening…"
+                        : req.role === "landlord"
+                          ? "WhatsApp renter"
+                          : req.role === "seller"
+                            ? "WhatsApp buyer"
+                            : "WhatsApp"}
                     </Button>
                   )}
                   {req.role === "renter" && hasTenantProfile && m.matched_role === "landlord" && m.contact_whatsapp && (
@@ -398,14 +437,6 @@ export default function RequirementDetailPage() {
         </div>
       )}
 
-      {followUpMatchId && (
-        <Card className="mb-4 space-y-3">
-          <div className="font-semibold">Schedule follow-up</div>
-          <Input type="datetime-local" value={followUpAt} onChange={(e) => setFollowUpAt(e.target.value)} />
-          <Button className="w-full" onClick={saveFollowUp} disabled={!followUpAt}>Save follow-up</Button>
-        </Card>
-      )}
-
       <h2 className="mb-3 font-semibold">Timeline</h2>
       {activities.length === 0 ? (
         <EmptyState message="No activity yet" />
@@ -421,57 +452,5 @@ export default function RequirementDetailPage() {
         </div>
       )}
     </AppShell>
-  );
-}
-
-function AvailableSection({
-  title,
-  items,
-  stream,
-  req,
-  onShareLandlord,
-}: {
-  title: string;
-  items: AvailableProperty[];
-  stream: string;
-  req: LeadRequirement;
-  onShareLandlord: (phone: string | null | undefined) => void;
-}) {
-  if (!items.length) return null;
-  const showLandlordShare =
-    req.stream_type === "rental" &&
-    (req.tenant_type || req.occupant_count || req.profession || req.workplace_text);
-
-  return (
-    <div className="mb-4">
-      <h3 className="mb-2 font-semibold">{title} ({items.length})</h3>
-      <div className="space-y-2">
-        {items.slice(0, 8).map((p, i) => (
-          <Card key={`${p.listing_id || p.spec_id}-${i}`} className="flex gap-3">
-            {p.cover_url && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={mediaUrl(p.cover_url) || ""} alt="" className="h-16 w-16 rounded-lg object-cover" />
-            )}
-            <div className="flex-1">
-              <div className="font-medium">{p.title}</div>
-              <div className="text-sm text-slate-600">{p.location}</div>
-              <div className="text-sm">
-                {formatPrice(p.price, stream)}
-                {p.distance_km != null ? ` · ${p.distance_km} km` : ""}
-              </div>
-              {showLandlordShare && p.contact_whatsapp && (
-                <button
-                  type="button"
-                  onClick={() => onShareLandlord(p.contact_whatsapp)}
-                  className="mt-2 text-sm text-emerald-600"
-                >
-                  Share tenant profile with landlord
-                </button>
-              )}
-            </div>
-          </Card>
-        ))}
-      </div>
-    </div>
   );
 }

@@ -18,7 +18,10 @@ export type WhatsAppContext =
       bhk?: string;
       propertyType?: string;
       price?: string;
+      deposit?: string;
+      maintenance?: string;
       availableFrom?: string;
+      photoNote?: string;
     }
   | {
       type: "tenant_for_landlord";
@@ -60,7 +63,10 @@ export function whatsappMessage(ctx: WhatsAppContext): string {
       const lines = [
         `Hi ${ctx.name}, we have a ${parts.join(" ")} that may suit you.`,
       ];
+      if (ctx.deposit) lines.push(`Deposit: ${ctx.deposit}`);
+      if (ctx.maintenance) lines.push(`Maintenance: ${ctx.maintenance}`);
       if (ctx.availableFrom) lines.push(`Available from: ${ctx.availableFrom}`);
+      if (ctx.photoNote) lines.push(ctx.photoNote);
       lines.push("Would you like more details or a visit?");
       return lines.join("\n");
     }
@@ -86,6 +92,49 @@ export function whatsappLink(phone: string, ctx?: WhatsAppContext): string {
   const base = `https://wa.me/${digits}`;
   if (!ctx) return base;
   return `${base}?text=${encodeURIComponent(whatsappMessage(ctx))}`;
+}
+
+/** Try sharing text + images via the OS share sheet (often opens WhatsApp with photos). Falls back to wa.me text link. */
+export async function shareViaWhatsApp(opts: {
+  phone: string;
+  text: string;
+  imageUrls?: string[];
+}): Promise<"shared" | "link"> {
+  const files: File[] = [];
+  for (const url of (opts.imageUrls || []).slice(0, 5)) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      if (!blob.type.startsWith("image/")) continue;
+      const ext = blob.type.split("/")[1] || "jpg";
+      files.push(new File([blob], `property-${files.length + 1}.${ext}`, { type: blob.type }));
+    } catch {
+      // skip failed image
+    }
+  }
+
+  const shareData: ShareData = { text: opts.text };
+  if (files.length && typeof navigator !== "undefined" && navigator.canShare?.({ files })) {
+    shareData.files = files;
+  }
+
+  if (
+    typeof navigator !== "undefined" &&
+    navigator.share &&
+    (!shareData.files || navigator.canShare?.(shareData))
+  ) {
+    try {
+      await navigator.share(shareData);
+      return "shared";
+    } catch (err) {
+      // User cancelled or share failed — fall through to wa.me
+      if (err instanceof DOMException && err.name === "AbortError") return "link";
+    }
+  }
+
+  window.open(whatsappLink(opts.phone, { type: "custom", message: opts.text }), "_blank");
+  return "link";
 }
 
 export function formatVisitTime(iso: string): string {

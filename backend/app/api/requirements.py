@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -291,15 +291,34 @@ async def inform_match(
     match.status = f"informed_{via}"
     match.informed_at = datetime.now(UTC)
     match.informed_via = via
+    follow_at = datetime.now(UTC) + timedelta(days=1)
+    match.follow_up_at = follow_at
     if body.notes:
         match.notes = body.notes
     contact = match.requirement.contact if match.requirement else None
+    # Follow up with the person we messaged (counterpart for supply leads).
+    follow_contact = contact
+    if (
+        match.requirement
+        and match.requirement.role in ("landlord", "seller")
+        and match.matched_requirement
+        and match.matched_requirement.contact
+    ):
+        follow_contact = match.matched_requirement.contact
+    if follow_contact:
+        follow_contact.follow_up_at = follow_at
     info = _match_property_info(match)
+    sent_label = body.notes or info.get("title") or "property"
+    whom = follow_contact.name if follow_contact else "contact"
+    # Log on the lead we're working (landlord/seller/renter page timeline).
     db.add(
         Activity(
             contact_id=contact.id if contact else None,
             activity_type="match_informed",
-            content=f"Informed via {via}: {info.get('title') or 'property'}",
+            content=(
+                f"Informed {whom} via {via}. Follow-up {follow_at.date().isoformat()}. "
+                f"Sent: {sent_label}"
+            ),
             created_by_id=user.id,
         )
     )
