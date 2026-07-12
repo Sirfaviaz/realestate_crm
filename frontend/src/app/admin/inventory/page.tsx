@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { inventoryApi, listingsApi, contactsApi, type Location, type Project, type Contact } from "@/lib/api";
 import {
   AMENITY_OPTIONS,
@@ -349,9 +350,12 @@ export default function InventoryAdminPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-2 text-2xl font-bold">Data Entry</h1>
+      <Link href="/listings" className="mb-3 inline-flex items-center gap-1 text-sm text-slate-600">
+        ← Back to Properties
+      </Link>
+      <h1 className="mb-2 text-2xl font-bold">Add property</h1>
       <p className="mb-4 text-sm text-slate-600">
-        Use <strong>Listing</strong> for seller/landlord properties. Use Location → Project → Unit for builder inventory.
+        Create a sale/rental listing with photos, or manage builder inventory (Location → Project → Unit).
       </p>
 
       {(selectedLocation || selectedProject) && (

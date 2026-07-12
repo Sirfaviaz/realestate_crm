@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Home, Image, LogOut, PlusCircle, Upload, UserCircle, Users } from "lucide-react";
+import { Building2, Home, LogOut, PlusCircle, Upload, UserCircle, Users } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { isAdmin } from "@/lib/contact-roles";
 import { whatsappLink } from "@/lib/whatsapp";
@@ -39,8 +39,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <NavLink href="/" icon={Home} label="Home" active={pathname === "/"} />
           <NavLink href="/leads" icon={PlusCircle} label="Leads" active={pathname.startsWith("/leads") || pathname.startsWith("/call")} />
           <NavLink href="/contacts" icon={UserCircle} label="People" active={pathname.startsWith("/contacts")} />
-          <NavLink href="/listings" icon={Image} label="Listings" active={pathname.startsWith("/listings")} />
-          <NavLink href="/admin/inventory" icon={Building2} label="Properties" active={pathname.startsWith("/admin/inventory")} />
+          <NavLink
+            href="/listings"
+            icon={Building2}
+            label="Properties"
+            active={pathname.startsWith("/listings") || pathname.startsWith("/admin/inventory")}
+          />
           <NavLink href="/import" icon={Upload} label="Import" active={pathname.startsWith("/import")} />
           {admin && (
             <NavLink href="/admin/users" icon={Users} label="Users" active={pathname.startsWith("/admin/users")} />
