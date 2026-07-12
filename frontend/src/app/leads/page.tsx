@@ -1,0 +1,529 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { ChevronLeft, Plus, Search } from "lucide-react";
+import { contactsApi, mediaUrl, requirementsApi, type AvailableNowResponse, type Contact, type LeadRequirement, type LocationAnchor } from "@/lib/api";
+import {
+  CONTACT_TYPES,
+  LEAD_SCORE_OPTIONS,
+  PROPERTY_TYPES,
+  RADIUS_OPTIONS,
+  TENANT_TYPES,
+  URGENCY_OPTIONS,
+  getContactType,
+  roleLabel,
+  type ContactRoleKey,
+} from "@/lib/contact-roles";
+import { BHK_OPTIONS } from "@/lib/inventory-presets";
+import { formatPrice } from "@/lib/utils";
+import { AppShell } from "@/components/app-shell";
+import { GooglePlacesInput } from "@/components/google-places-input";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Input,
+  ListItem,
+  LoadingSpinner,
+  SearchBar,
+  StepHeader,
+  Textarea,
+  FormSelect,
+} from "@/components/ui";
+
+type Mode = "hub" | "create" | "work";
+
+export default function LeadsPage() {
+  const router = useRouter();
+  const [mode, setMode] = useState<Mode>("hub");
+  const [createStep, setCreateStep] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const [personForm, setPersonForm] = useState({ name: "", phone: "", whatsapp: "", existingId: "" });
+  const [role, setRole] = useState<ContactRoleKey | null>(null);
+  const [reqForm, setReqForm] = useState({
+    property_types: [] as string[],
+    locations: "",
+    city: "",
+    search_radius_km: 5,
+    bhk: "",
+    budget_min: "",
+    budget_max: "",
+    rent_budget: "",
+    move_in_date: "",
+    urgency: "",
+    lead_score: "",
+    notes: "",
+  });
+  const [tenantForm, setTenantForm] = useState({
+    tenant_type: "",
+    occupant_count: "",
+    profession: "",
+    workplace_text: "",
+    workplace_lat: undefined as number | undefined,
+    workplace_lng: undefined as number | undefined,
+  });
+  const [locationAnchors, setLocationAnchors] = useState<LocationAnchor[]>([]);
+  const [savedReqId, setSavedReqId] = useState<string | null>(null);
+  const [available, setAvailable] = useState<AvailableNowResponse | null>(null);
+
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [requirements, setRequirements] = useState<LeadRequirement[]>([]);
+
+  const loadRequirements = useCallback(async (q?: string) => {
+    setLoading(true);
+    try {
+      setRequirements(await requirementsApi.list({ q, status: "active" }));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mode === "work") {
+      const t = setTimeout(() => loadRequirements(query || undefined), 300);
+      return () => clearTimeout(t);
+    }
+  }, [mode, query, loadRequirements]);
+
+  const loadContacts = async (q?: string) => {
+    setLoading(true);
+    try {
+      setContacts(await contactsApi.list(q));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const togglePropertyType = (value: string) => {
+    setReqForm((f) => ({
+      ...f,
+      property_types: f.property_types.includes(value)
+        ? f.property_types.filter((x) => x !== value)
+        : [...f.property_types, value],
+    }));
+  };
+
+  const addLocationAnchor = (place: { area: string; city: string; latitude?: number; longitude?: number }) => {
+    if (place.latitude == null || place.longitude == null) return;
+    const name = [place.area, place.city].filter(Boolean).join(", ");
+    setLocationAnchors((prev) => {
+      if (prev.some((a) => a.lat === place.latitude && a.lng === place.longitude)) return prev;
+      return [...prev, { name, lat: place.latitude!, lng: place.longitude! }];
+    });
+    if (!reqForm.city && place.city) setReqForm((f) => ({ ...f, city: place.city }));
+  };
+
+  const saveLead = async () => {
+    if (!role) return;
+    setLoading(true);
+    try {
+      const meta = getContactType(role);
+      const tenantPayload = {
+        tenant_type: tenantForm.tenant_type || undefined,
+        occupant_count: tenantForm.occupant_count ? Number(tenantForm.occupant_count) : undefined,
+        profession: tenantForm.profession || undefined,
+        workplace_text: tenantForm.workplace_text || undefined,
+        workplace_lat: tenantForm.workplace_lat,
+        workplace_lng: tenantForm.workplace_lng,
+      };
+      let contactId = personForm.existingId;
+      if (!contactId) {
+        const c = await contactsApi.create({
+          name: personForm.name,
+          phone: personForm.phone,
+          whatsapp: personForm.whatsapp || undefined,
+          roles: [role],
+          stream_type: meta.stream,
+          ...tenantPayload,
+        });
+        contactId = c.id;
+      } else {
+        await contactsApi.update(contactId, {
+          name: personForm.name,
+          phone: personForm.phone,
+          whatsapp: personForm.whatsapp || undefined,
+          roles: [role],
+          stream_type: meta.stream,
+          ...tenantPayload,
+        });
+      }
+      const anchors = [...locationAnchors];
+      if (tenantForm.workplace_lat != null && tenantForm.workplace_lng != null) {
+        const wp = {
+          name: tenantForm.workplace_text || "Workplace",
+          lat: tenantForm.workplace_lat,
+          lng: tenantForm.workplace_lng,
+        };
+        if (!anchors.some((a) => a.lat === wp.lat && a.lng === wp.lng)) {
+          anchors.unshift(wp);
+        }
+      }
+      const req = await requirementsApi.create({
+        contact_id: contactId,
+        role,
+        stream_type: meta.stream,
+        property_types: reqForm.property_types.length ? reqForm.property_types : undefined,
+        preferred_locations: reqForm.locations
+          ? reqForm.locations.split(",").map((x) => x.trim()).filter(Boolean)
+          : undefined,
+        location_anchors: anchors.length ? anchors : undefined,
+        city: reqForm.city || undefined,
+        search_radius_km: reqForm.search_radius_km,
+        bhk: reqForm.bhk || undefined,
+        budget_min: reqForm.budget_min ? Number(reqForm.budget_min) : undefined,
+        budget_max: reqForm.budget_max ? Number(reqForm.budget_max) : undefined,
+        rent_budget: reqForm.rent_budget ? Number(reqForm.rent_budget) : undefined,
+        move_in_date: reqForm.move_in_date || undefined,
+        urgency: reqForm.urgency || undefined,
+        lead_score: reqForm.lead_score || undefined,
+        notes: reqForm.notes || undefined,
+      });
+      const avail = await requirementsApi.availableNow(req.id);
+      setSavedReqId(req.id);
+      setAvailable(avail);
+      setCreateStep(3);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetCreate = () => {
+    setCreateStep(0);
+    setPersonForm({ name: "", phone: "", whatsapp: "", existingId: "" });
+    setRole(null);
+    setReqForm({
+      property_types: [],
+      locations: "",
+      city: "",
+      search_radius_km: 5,
+      bhk: "",
+      budget_min: "",
+      budget_max: "",
+      rent_budget: "",
+      move_in_date: "",
+      urgency: "",
+      lead_score: "",
+      notes: "",
+    });
+    setTenantForm({
+      tenant_type: "",
+      occupant_count: "",
+      profession: "",
+      workplace_text: "",
+      workplace_lat: undefined,
+      workplace_lng: undefined,
+    });
+    setLocationAnchors([]);
+    setSavedReqId(null);
+    setAvailable(null);
+  };
+
+  const goBack = () => {
+    if (mode === "create" && createStep > 0) {
+      setCreateStep(createStep - 1);
+    } else {
+      setMode("hub");
+      resetCreate();
+      setQuery("");
+    }
+  };
+
+  if (mode === "hub") {
+    return (
+      <AppShell>
+        <h1 className="mb-1 text-2xl font-bold">Leads</h1>
+        <p className="mb-6 text-slate-600">Create a lead with requirements, or work an existing search.</p>
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => { setMode("create"); setCreateStep(0); }}
+            className="flex w-full items-center gap-4 rounded-2xl border-2 border-emerald-500 bg-emerald-600 p-5 text-left text-white"
+          >
+            <Plus className="h-8 w-8" />
+            <div>
+              <div className="text-lg font-semibold">Create Lead</div>
+              <div className="text-sm opacity-90">New person + what they&apos;re looking for</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("work")}
+            className="flex w-full items-center gap-4 rounded-2xl border-2 border-slate-200 bg-white p-5 text-left hover:border-emerald-300"
+          >
+            <Search className="h-8 w-8 text-emerald-600" />
+            <div>
+              <div className="text-lg font-semibold">Work Lead</div>
+              <div className="text-sm text-slate-500">Open requirements, matches & follow-ups</div>
+            </div>
+          </button>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (mode === "work") {
+    return (
+      <AppShell>
+        <button type="button" onClick={goBack} className="mb-3 flex items-center gap-1 text-sm text-slate-600">
+          <ChevronLeft className="h-4 w-4" /> Back
+        </button>
+        <h1 className="mb-4 text-2xl font-bold">Work Lead</h1>
+        <SearchBar value={query} onChange={setQuery} placeholder="Search name, phone, location..." />
+        {loading ? <LoadingSpinner /> : requirements.length === 0 ? (
+          <EmptyState message="No active requirements" />
+        ) : (
+          <div className="mt-4 space-y-2">
+            {requirements.map((r) => (
+              <Link key={r.id} href={`/leads/${r.id}`}>
+                <ListItem
+                  title={r.contact_name || "Contact"}
+                  subtitle={[roleLabel(r.role), r.preferred_locations?.join(", ")].filter(Boolean).join(" · ")}
+                  right={
+                    <div className="flex gap-1">
+                      {(r.new_match_count ?? 0) > 0 && (
+                        <Badge className="bg-orange-500 text-white">{r.new_match_count} new</Badge>
+                      )}
+                      <Badge className="capitalize">{r.status}</Badge>
+                    </div>
+                  }
+                />
+              </Link>
+            ))}
+          </div>
+        )}
+      </AppShell>
+    );
+  }
+
+  const meta = role ? getContactType(role) : null;
+  const createTitles = ["Person", "Role", "Requirements", "Available now"];
+
+  return (
+    <AppShell>
+      <button type="button" onClick={goBack} className="mb-3 flex items-center gap-1 text-sm text-slate-600">
+        <ChevronLeft className="h-4 w-4" /> Back
+      </button>
+      <StepHeader step={createStep + 1} total={4} title={`Create Lead — ${createTitles[createStep]}`} />
+
+      {createStep === 0 && (
+        <Card className="space-y-3">
+          <p className="text-sm text-slate-600">Enter person details or pick an existing contact.</p>
+          <Input placeholder="Name *" value={personForm.name} onChange={(e) => setPersonForm({ ...personForm, name: e.target.value, existingId: "" })} />
+          <Input placeholder="Phone *" value={personForm.phone} onChange={(e) => setPersonForm({ ...personForm, phone: e.target.value, existingId: "" })} />
+          <Input placeholder="WhatsApp (optional)" value={personForm.whatsapp} onChange={(e) => setPersonForm({ ...personForm, whatsapp: e.target.value })} />
+          <Button variant="outline" className="w-full" onClick={() => loadContacts()}>Search existing</Button>
+          {contacts.length > 0 && (
+            <div className="max-h-40 space-y-1 overflow-y-auto">
+              {contacts.map((c) => (
+                <ListItem
+                  key={c.id}
+                  title={c.name}
+                  subtitle={c.phone}
+                  onClick={() => setPersonForm({ name: c.name, phone: c.phone, whatsapp: c.whatsapp || "", existingId: c.id })}
+                  active={personForm.existingId === c.id}
+                />
+              ))}
+            </div>
+          )}
+          <Button
+            className="w-full"
+            disabled={!personForm.name || !personForm.phone}
+            onClick={() => setCreateStep(1)}
+          >
+            Next
+          </Button>
+        </Card>
+      )}
+
+      {createStep === 1 && (
+        <div className="grid grid-cols-2 gap-3">
+          {CONTACT_TYPES.map((t) => (
+            <button
+              key={t.role}
+              type="button"
+              onClick={() => { setRole(t.role); setCreateStep(2); }}
+              className={`rounded-2xl border-2 p-4 text-left min-h-[90px] ${role === t.role ? "border-emerald-500 bg-emerald-50" : "border-slate-200 bg-white hover:border-emerald-300"}`}
+            >
+              <div className="font-bold">{t.label}</div>
+              <div className="text-sm text-slate-500">{t.description}</div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {createStep === 2 && meta && (
+        <Card className="space-y-3">
+          <p className="text-sm text-slate-600">What is {personForm.name} looking for?</p>
+          <div>
+            <div className="mb-2 text-sm font-medium">Property type</div>
+            <div className="flex flex-wrap gap-2">
+              {PROPERTY_TYPES.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => togglePropertyType(t.value)}
+                  className={`rounded-full px-3 py-1 text-sm ${reqForm.property_types.includes(t.value) ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Input
+            placeholder="City (e.g. Mumbai)"
+            value={reqForm.city}
+            onChange={(e) => setReqForm({ ...reqForm, city: e.target.value })}
+          />
+          <div>
+            <div className="mb-2 text-sm font-medium">Search radius</div>
+            <div className="flex gap-2">
+              {RADIUS_OPTIONS.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => setReqForm({ ...reqForm, search_radius_km: r.value })}
+                  className={`rounded-full px-3 py-1 text-sm ${reqForm.search_radius_km === r.value ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-2 text-sm font-medium">Pin areas on map</div>
+            <GooglePlacesInput onSelect={addLocationAnchor} placeholder="Add preferred area..." className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" />
+            {locationAnchors.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {locationAnchors.map((a) => (
+                  <Badge key={`${a.lat}-${a.lng}`}>{a.name}</Badge>
+                ))}
+              </div>
+            )}
+          </div>
+          <Input
+            placeholder="More areas (comma separated)"
+            value={reqForm.locations}
+            onChange={(e) => setReqForm({ ...reqForm, locations: e.target.value })}
+          />
+          {(role === "renter" || role === "buyer") && (
+            <>
+              <div className="border-t border-slate-100 pt-3">
+                <div className="mb-2 text-sm font-medium">Tenant / buyer profile</div>
+                <select
+                  className="mb-2 min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+                  value={tenantForm.tenant_type}
+                  onChange={(e) => setTenantForm({ ...tenantForm, tenant_type: e.target.value })}
+                >
+                  <option value="">Tenant type</option>
+                  {TENANT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <Input
+                  placeholder="Number of occupants"
+                  type="number"
+                  value={tenantForm.occupant_count}
+                  onChange={(e) => setTenantForm({ ...tenantForm, occupant_count: e.target.value })}
+                />
+                <Input
+                  placeholder="Profession"
+                  value={tenantForm.profession}
+                  onChange={(e) => setTenantForm({ ...tenantForm, profession: e.target.value })}
+                  className="mt-2"
+                />
+                <div className="mt-2 text-sm text-slate-600">Workplace (for location search)</div>
+                <GooglePlacesInput
+                  onSelect={(p) => setTenantForm({
+                    ...tenantForm,
+                    workplace_text: [p.area, p.city].filter(Boolean).join(", "),
+                    workplace_lat: p.latitude,
+                    workplace_lng: p.longitude,
+                  })}
+                  placeholder="Office / work area..."
+                  className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+                />
+              </div>
+            </>
+          )}
+          <FormSelect
+            value={reqForm.bhk}
+            onChange={(v) => setReqForm({ ...reqForm, bhk: v })}
+            options={BHK_OPTIONS}
+            placeholder="Select BHK"
+          />
+          {meta.stream === "sales" ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Input placeholder="Budget min" type="number" value={reqForm.budget_min} onChange={(e) => setReqForm({ ...reqForm, budget_min: e.target.value })} />
+              <Input placeholder="Budget max" type="number" value={reqForm.budget_max} onChange={(e) => setReqForm({ ...reqForm, budget_max: e.target.value })} />
+            </div>
+          ) : (
+            <Input placeholder="Rent budget / month" type="number" value={reqForm.rent_budget} onChange={(e) => setReqForm({ ...reqForm, rent_budget: e.target.value })} />
+          )}
+          <Input type="date" value={reqForm.move_in_date} onChange={(e) => setReqForm({ ...reqForm, move_in_date: e.target.value })} />
+          <select className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" value={reqForm.urgency} onChange={(e) => setReqForm({ ...reqForm, urgency: e.target.value })}>
+            <option value="">Urgency</option>
+            {URGENCY_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+          </select>
+          <select className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" value={reqForm.lead_score} onChange={(e) => setReqForm({ ...reqForm, lead_score: e.target.value })}>
+            <option value="">Lead score</option>
+            {LEAD_SCORE_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <Textarea placeholder="Notes" value={reqForm.notes} onChange={(e) => setReqForm({ ...reqForm, notes: e.target.value })} />
+          <Button className="w-full" disabled={loading} onClick={saveLead}>
+            {loading ? "Saving..." : "Save & find properties"}
+          </Button>
+        </Card>
+      )}
+
+      {createStep === 3 && available && savedReqId && (
+        <div className="space-y-4">
+          <AvailableSection
+            title={`Within ${available.search_radius_km || 5} km`}
+            items={available.within_radius}
+            stream={role ? getContactType(role).stream : "rental"}
+          />
+          <AvailableSection title="Within 10 km" items={available.within_10km} stream={role ? getContactType(role).stream : "rental"} />
+          <AvailableSection title={`In ${reqForm.city || "city"}`} items={available.in_city} stream={role ? getContactType(role).stream : "rental"} />
+          <Button className="w-full" onClick={() => router.push(`/leads/${savedReqId}`)}>
+            Open lead & manage matches
+          </Button>
+        </div>
+      )}
+    </AppShell>
+  );
+}
+
+function AvailableSection({
+  title,
+  items,
+  stream,
+}: {
+  title: string;
+  items: AvailableNowResponse["within_radius"];
+  stream: string;
+}) {
+  if (!items.length) return null;
+  return (
+    <div>
+      <h3 className="mb-2 font-semibold">{title} ({items.length})</h3>
+      <div className="space-y-2">
+        {items.slice(0, 5).map((p, i) => (
+          <Card key={`${p.listing_id || p.spec_id}-${i}`} className="flex gap-3">
+            {p.cover_url && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={mediaUrl(p.cover_url) || ""} alt="" className="h-16 w-16 rounded-lg object-cover" />
+            )}
+            <div>
+              <div className="font-medium">{p.title}</div>
+              <div className="text-sm text-slate-600">{p.location}</div>
+              <div className="text-sm">{formatPrice(p.price, stream)} {p.distance_km != null ? `· ${p.distance_km} km` : ""}</div>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: crm
+      POSTGRES_DB: realestate_crm
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d realestate_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://crm:crm@db:5432/realestate_crm
+      CORS_ORIGINS: http://localhost:3000
+      JWT_SECRET: dev-secret-change-in-production
+      DEBUG: "true"
+      SMTP_HOST: ""
+      SMTP_PORT: "587"
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      EMAIL_FROM: noreply@realestate-crm.local
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  pgdata:

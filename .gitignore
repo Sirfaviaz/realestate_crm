@@ -1,0 +1,13 @@
+.env
+.env.local
+*.pyc
+__pycache__/
+.venv/
+venv/
+node_modules/
+.next/
+dist/
+*.egg-info/
+.DS_Store
+backend/.env
+backend/app/data/media/
