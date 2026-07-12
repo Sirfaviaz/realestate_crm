@@ -189,13 +189,46 @@ export default function LeadsPage() {
     setMediaError(next.length ? validateMediaFiles(next) : null);
   };
 
+  const validateSupplyDetails = (): string | null => {
+    if (!reqForm.property_types.length) return "Select a property type.";
+    if (!reqForm.city.trim()) return "City is required.";
+    if (!locationAnchors.length) return "Property area is required.";
+    if (!reqForm.bhk) return "BHK is required.";
+    if (role === "landlord") {
+      if (!reqForm.rent_budget || Number(reqForm.rent_budget) <= 0) return "Asking rent is required.";
+      if (reqForm.security_deposit === "" || Number(reqForm.security_deposit) < 0) {
+        return "Security deposit is required.";
+      }
+      if (reqForm.maintenance === "" || Number(reqForm.maintenance) < 0) {
+        return "Maintenance is required.";
+      }
+    }
+    if (role === "seller") {
+      if (!reqForm.budget_max || Number(reqForm.budget_max) <= 0) return "Asking price is required.";
+    }
+    if (!reqForm.urgency) return "Urgency is required.";
+    if (!reqForm.move_in_date) return "Property available from date is required.";
+    if (!reqForm.lead_score) return "Lead score is required.";
+    if (!mediaFiles.length) return "At least one photo is required.";
+    const mediaErr = validateMediaFiles(mediaFiles);
+    if (mediaErr) return mediaErr;
+    if (!mediaFiles.some((f) => mediaKind(f) === "image")) {
+      return "At least one photo (image) is required. Videos alone are not enough.";
+    }
+    return null;
+  };
+
   const saveLead = async () => {
     if (!role) return;
     setFormError(null);
-    if (isSupply && mediaFiles.length) {
-      const err = validateMediaFiles(mediaFiles);
+    const supply = role === "landlord" || role === "seller";
+    if (supply) {
+      const err = validateSupplyDetails();
       if (err) {
-        setMediaError(err);
+        setFormError(err);
+        if (err.toLowerCase().includes("photo") || err.toLowerCase().includes("video") || err.toLowerCase().includes("file")) {
+          setMediaError(err);
+        }
         return;
       }
     }
@@ -495,7 +528,7 @@ export default function LeadsPage() {
               : `What is ${personForm.name} looking for?`}
           </p>
           <div>
-            <div className="mb-2 text-sm font-medium">Property type</div>
+            <div className="mb-2 text-sm font-medium">Property type{isSupply ? " *" : ""}</div>
             <div className="flex flex-wrap gap-2">
               {PROPERTY_TYPES.map((t) => (
                 <button
@@ -513,7 +546,7 @@ export default function LeadsPage() {
             )}
           </div>
           <div>
-            <div className="mb-2 text-sm font-medium">City</div>
+            <div className="mb-2 text-sm font-medium">City{isSupply ? " *" : ""}</div>
             <GooglePlacesInput
               mode="city"
               value={reqForm.city}
@@ -528,7 +561,7 @@ export default function LeadsPage() {
           </div>
           {isSupply ? (
             <div>
-              <div className="mb-2 text-sm font-medium">Property area</div>
+              <div className="mb-2 text-sm font-medium">Property area *</div>
               <GooglePlacesInput
                 mode="area"
                 clearOnSelect
@@ -667,7 +700,7 @@ export default function LeadsPage() {
             value={reqForm.bhk}
             onChange={(v) => setReqForm({ ...reqForm, bhk: v })}
             options={BHK_OPTIONS}
-            placeholder="Select BHK"
+            placeholder={isSupply ? "Select BHK *" : "Select BHK"}
           />
           {role === "landlord" && (
             <div>
@@ -697,28 +730,32 @@ export default function LeadsPage() {
           {isSupply ? (
             meta.stream === "sales" ? (
               <Input
-                placeholder="Asking price"
+                placeholder="Asking price *"
                 type="number"
+                required
                 value={reqForm.budget_max}
                 onChange={(e) => setReqForm({ ...reqForm, budget_min: "", budget_max: e.target.value })}
               />
             ) : (
               <div className="space-y-2">
                 <Input
-                  placeholder="Asking rent / month"
+                  placeholder="Asking rent / month *"
                   type="number"
+                  required
                   value={reqForm.rent_budget}
                   onChange={(e) => setReqForm({ ...reqForm, rent_budget: e.target.value })}
                 />
                 <Input
-                  placeholder="Security deposit"
+                  placeholder="Security deposit *"
                   type="number"
+                  required
                   value={reqForm.security_deposit}
                   onChange={(e) => setReqForm({ ...reqForm, security_deposit: e.target.value })}
                 />
                 <Input
-                  placeholder="Maintenance / month"
+                  placeholder="Maintenance / month *"
                   type="number"
+                  required
                   value={reqForm.maintenance}
                   onChange={(e) => setReqForm({ ...reqForm, maintenance: e.target.value })}
                 />
@@ -734,13 +771,14 @@ export default function LeadsPage() {
           )}
           {isSupply && (
             <div>
-              <div className="mb-2 text-sm font-medium">Photos & videos</div>
+              <div className="mb-2 text-sm font-medium">Photos & videos *</div>
               <p className="mb-2 text-xs text-slate-500">
-                Images up to 25 MB (JPG, PNG, WebP, HEIC). Videos up to 100 MB (MP4, MOV, WebM). Max 12 files.
+                At least one photo required. Images up to 25 MB (JPG, PNG, WebP, HEIC). Videos up to 100 MB (MP4, MOV, WebM). Max 12 files.
               </p>
               <input
                 type="file"
                 multiple
+                required={mediaFiles.length === 0}
                 accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov,.webm"
                 className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-emerald-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white"
                 onChange={(e) => {
@@ -775,23 +813,36 @@ export default function LeadsPage() {
               )}
             </div>
           )}
-          <select className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" value={reqForm.urgency} onChange={(e) => setReqForm({ ...reqForm, urgency: e.target.value })}>
-            <option value="">Urgency</option>
+          <select
+            className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+            value={reqForm.urgency}
+            required={!!isSupply}
+            onChange={(e) => setReqForm({ ...reqForm, urgency: e.target.value })}
+          >
+            <option value="">{isSupply ? "Urgency *" : "Urgency"}</option>
             {URGENCY_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
           </select>
           <div>
-            <div className="mb-2 text-sm font-medium">{isSupply ? "Property available from" : "Move-in date"}</div>
+            <div className="mb-2 text-sm font-medium">
+              {isSupply ? "Property available from *" : "Move-in date"}
+            </div>
             <Input
               type="date"
+              required={!!isSupply}
               value={reqForm.move_in_date}
               onChange={(e) => setReqForm({ ...reqForm, move_in_date: e.target.value })}
             />
           </div>
-          <select className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" value={reqForm.lead_score} onChange={(e) => setReqForm({ ...reqForm, lead_score: e.target.value })}>
-            <option value="">Lead score</option>
+          <select
+            className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+            value={reqForm.lead_score}
+            required={!!isSupply}
+            onChange={(e) => setReqForm({ ...reqForm, lead_score: e.target.value })}
+          >
+            <option value="">{isSupply ? "Lead score *" : "Lead score"}</option>
             {LEAD_SCORE_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
-          <Textarea placeholder="Notes" value={reqForm.notes} onChange={(e) => setReqForm({ ...reqForm, notes: e.target.value })} />
+          <Textarea placeholder="Notes (optional)" value={reqForm.notes} onChange={(e) => setReqForm({ ...reqForm, notes: e.target.value })} />
           {formError && <p className="text-sm text-red-600">{formError}</p>}
           <Button className="w-full" disabled={loading || !!mediaError} onClick={saveLead}>
             {loading
