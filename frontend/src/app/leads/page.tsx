@@ -623,7 +623,13 @@ export default function LeadsPage() {
           </select>
           <Textarea placeholder="Notes" value={reqForm.notes} onChange={(e) => setReqForm({ ...reqForm, notes: e.target.value })} />
           <Button className="w-full" disabled={loading} onClick={saveLead}>
-            {loading ? "Saving..." : isSupply ? "Save property lead" : "Save & find properties"}
+            {loading
+              ? "Saving..."
+              : role === "landlord"
+                ? "Save & find renters"
+                : role === "seller"
+                  ? "Save & find buyers"
+                  : "Save & find properties"}
           </Button>
         </Card>
       )}
