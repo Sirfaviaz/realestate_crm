@@ -352,6 +352,7 @@ class LeadRequirementCreate(BaseModel):
     lead_score: str | None = None
     status: str = "active"
     notes: str | None = None
+    preferred_tenant_types: list[str] | None = None
     assigned_user_id: UUID | None = None
 
 

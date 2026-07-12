@@ -186,6 +186,7 @@ export type LeadRequirement = {
   lead_score?: string | null;
   status: string;
   notes?: string | null;
+  preferred_tenant_types?: string[] | null;
   contact_name?: string | null;
   contact_phone?: string | null;
   contact_whatsapp?: string | null;

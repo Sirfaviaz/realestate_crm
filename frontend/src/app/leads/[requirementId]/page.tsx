@@ -188,6 +188,16 @@ export default function RequirementDetailPage() {
             <div>Radius: {req.search_radius_km === 0 ? "Whole city" : `${req.search_radius_km} km`}</div>
           )}
           {req.bhk && <div>BHK: {req.bhk}</div>}
+          {req.role === "landlord" && (
+            <div>
+              Preferred tenants:{" "}
+              {req.preferred_tenant_types?.length
+                ? req.preferred_tenant_types
+                    .map((t) => TENANT_TYPES.find((x) => x.value === t)?.label || t)
+                    .join(", ")
+                : "All"}
+            </div>
+          )}
           {req.stream_type === "rental" && req.rent_budget != null && (
             <div>Budget: {formatPrice(req.rent_budget, "rental")}</div>
           )}

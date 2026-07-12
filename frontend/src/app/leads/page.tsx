@@ -68,6 +68,8 @@ export default function LeadsPage() {
   });
   const [locationAnchors, setLocationAnchors] = useState<LocationAnchor[]>([]);
   const [cityCenter, setCityCenter] = useState<{ lat: number; lng: number } | null>(null);
+  /** Landlord: empty = all tenant types welcome. */
+  const [preferredTenantTypes, setPreferredTenantTypes] = useState<string[]>([]);
   const [savedReqId, setSavedReqId] = useState<string | null>(null);
   const [available, setAvailable] = useState<AvailableNowResponse | null>(null);
 
@@ -110,6 +112,16 @@ export default function LeadsPage() {
 
   const setPropertyType = (value: string) => {
     setReqForm((f) => ({ ...f, property_types: [value] }));
+  };
+
+  const togglePreferredTenantType = (value: string) => {
+    if (value === "all") {
+      setPreferredTenantTypes([]);
+      return;
+    }
+    setPreferredTenantTypes((prev) =>
+      prev.includes(value) ? prev.filter((x) => x !== value) : [...prev, value]
+    );
   };
 
   const addLocationAnchor = (place: { area: string; city: string; latitude?: number; longitude?: number }) => {
@@ -210,6 +222,12 @@ export default function LeadsPage() {
         urgency: reqForm.urgency || undefined,
         lead_score: reqForm.lead_score || undefined,
         notes: reqForm.notes || undefined,
+        preferred_tenant_types:
+          role === "landlord"
+            ? preferredTenantTypes.length
+              ? preferredTenantTypes
+              : null
+            : undefined,
       });
       const avail = await requirementsApi.availableNow(req.id);
       setSavedReqId(req.id);
@@ -247,6 +265,7 @@ export default function LeadsPage() {
     });
     setLocationAnchors([]);
     setCityCenter(null);
+    setPreferredTenantTypes([]);
     setSavedReqId(null);
     setAvailable(null);
   };
@@ -581,6 +600,31 @@ export default function LeadsPage() {
             options={BHK_OPTIONS}
             placeholder="Select BHK"
           />
+          {role === "landlord" && (
+            <div>
+              <div className="mb-2 text-sm font-medium">Preferred tenants</div>
+              <p className="mb-2 text-xs text-slate-500">All, or pick one or more types.</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => togglePreferredTenantType("all")}
+                  className={`rounded-full px-3 py-1 text-sm ${preferredTenantTypes.length === 0 ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
+                >
+                  All
+                </button>
+                {TENANT_TYPES.map((t) => (
+                  <button
+                    key={t.value}
+                    type="button"
+                    onClick={() => togglePreferredTenantType(t.value)}
+                    className={`rounded-full px-3 py-1 text-sm ${preferredTenantTypes.includes(t.value) ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {isSupply ? (
             meta.stream === "sales" ? (
               <Input
