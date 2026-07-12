@@ -108,6 +108,10 @@ export default function LeadsPage() {
     }));
   };
 
+  const setPropertyType = (value: string) => {
+    setReqForm((f) => ({ ...f, property_types: [value] }));
+  };
+
   const addLocationAnchor = (place: { area: string; city: string; latitude?: number; longitude?: number }) => {
     if (place.latitude == null || place.longitude == null) return;
     const name = place.area || place.city;
@@ -117,6 +121,15 @@ export default function LeadsPage() {
       return [...prev, { name, lat: place.latitude!, lng: place.longitude! }];
     });
     if (!reqForm.city && place.city) setReqForm((f) => ({ ...f, city: place.city }));
+  };
+
+  /** Landlord/seller: one property pin, not a priority list. */
+  const setPropertyLocation = (place: { area: string; city: string; latitude?: number; longitude?: number }) => {
+    if (place.latitude == null || place.longitude == null) return;
+    const name = place.area || place.city;
+    if (!name) return;
+    setLocationAnchors([{ name, lat: place.latitude, lng: place.longitude }]);
+    if (place.city) setReqForm((f) => ({ ...f, city: f.city || place.city }));
   };
 
   const removeLocationAnchor = (index: number) => {
@@ -316,6 +329,7 @@ export default function LeadsPage() {
   }
 
   const meta = role ? getContactType(role) : null;
+  const isSupply = role === "landlord" || role === "seller";
   const createTitles = ["Person", "Role", "Requirements", "Available now"];
 
   return (
@@ -387,7 +401,11 @@ export default function LeadsPage() {
 
       {createStep === 2 && meta && (
         <Card className="space-y-3">
-          <p className="text-sm text-slate-600">What is {personForm.name} looking for?</p>
+          <p className="text-sm text-slate-600">
+            {isSupply
+              ? `What are ${personForm.name}'s property details?`
+              : `What is ${personForm.name} looking for?`}
+          </p>
           <div>
             <div className="mb-2 text-sm font-medium">Property type</div>
             <div className="flex flex-wrap gap-2">
@@ -395,13 +413,16 @@ export default function LeadsPage() {
                 <button
                   key={t.value}
                   type="button"
-                  onClick={() => togglePropertyType(t.value)}
+                  onClick={() => (isSupply ? setPropertyType(t.value) : togglePropertyType(t.value))}
                   className={`rounded-full px-3 py-1 text-sm ${reqForm.property_types.includes(t.value) ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
                 >
                   {t.label}
                 </button>
               ))}
             </div>
+            {!isSupply && (
+              <p className="mt-1 text-xs text-slate-500">You can select more than one.</p>
+            )}
           </div>
           <div>
             <div className="mb-2 text-sm font-medium">City</div>
@@ -417,113 +438,142 @@ export default function LeadsPage() {
               className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
             />
           </div>
-          <div>
-            <div className="mb-2 text-sm font-medium">Preferred areas</div>
-            <p className="mb-2 text-xs text-slate-500">
-              Add in priority order (1 = most preferred). Use arrows to reorder.
-            </p>
-            <GooglePlacesInput
-              mode="area"
-              clearOnSelect
-              locationBias={cityCenter}
-              onSelect={addLocationAnchor}
-              placeholder={reqForm.city ? `Area in ${reqForm.city}...` : "Add preferred area..."}
-              className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
-            />
-            {locationAnchors.length > 0 && (
-              <ul className="mt-2 space-y-2">
-                {locationAnchors.map((a, index) => (
-                  <li
-                    key={`${a.lat}-${a.lng}-${a.name}`}
-                    className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2"
+          {isSupply ? (
+            <div>
+              <div className="mb-2 text-sm font-medium">Property area</div>
+              <GooglePlacesInput
+                mode="area"
+                clearOnSelect
+                locationBias={cityCenter}
+                onSelect={setPropertyLocation}
+                placeholder={reqForm.city ? `Area in ${reqForm.city}...` : "Property locality / area..."}
+                className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+              />
+              {locationAnchors[0] && (
+                <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                  <span className="min-w-0 flex-1 text-sm font-medium text-emerald-900">
+                    {locationAnchors[0].name}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Clear area"
+                    onClick={() => setLocationAnchors([])}
+                    className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-red-600"
                   >
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">
-                      {index + 1}
-                    </span>
-                    <span className="min-w-0 flex-1 text-sm font-medium text-emerald-900">{a.name}</span>
-                    <button
-                      type="button"
-                      aria-label="Move up"
-                      disabled={index === 0}
-                      onClick={() => moveLocationAnchor(index, -1)}
-                      className="rounded-lg p-1.5 text-emerald-800 disabled:opacity-30"
-                    >
-                      <ChevronUp className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Move down"
-                      disabled={index === locationAnchors.length - 1}
-                      onClick={() => moveLocationAnchor(index, 1)}
-                      className="rounded-lg p-1.5 text-emerald-800 disabled:opacity-30"
-                    >
-                      <ChevronDown className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${a.name}`}
-                      onClick={() => removeLocationAnchor(index)}
-                      className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-red-600"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div>
-            <div className="mb-2 text-sm font-medium">Search radius</div>
-            <div className="flex gap-2">
-              {RADIUS_OPTIONS.map((r) => (
-                <button
-                  key={r.value}
-                  type="button"
-                  onClick={() => setReqForm({ ...reqForm, search_radius_km: r.value })}
-                  className={`rounded-full px-3 py-1 text-sm ${reqForm.search_radius_km === r.value ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
-                >
-                  {r.label}
-                </button>
-              ))}
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-          {(role === "renter" || role === "buyer") && (
+          ) : (
             <>
-              <div className="border-t border-slate-100 pt-3">
-                <div className="mb-2 text-sm font-medium">Tenant / buyer profile</div>
-                <select
-                  className="mb-2 min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
-                  value={tenantForm.tenant_type}
-                  onChange={(e) => setTenantForm({ ...tenantForm, tenant_type: e.target.value })}
-                >
-                  <option value="">Tenant type</option>
-                  {TENANT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
-                <Input
-                  placeholder="Number of occupants"
-                  type="number"
-                  value={tenantForm.occupant_count}
-                  onChange={(e) => setTenantForm({ ...tenantForm, occupant_count: e.target.value })}
-                />
-                <Input
-                  placeholder="Profession"
-                  value={tenantForm.profession}
-                  onChange={(e) => setTenantForm({ ...tenantForm, profession: e.target.value })}
-                  className="mt-2"
-                />
-                <div className="mt-2 text-sm text-slate-600">Workplace (for location search)</div>
+              <div>
+                <div className="mb-2 text-sm font-medium">Preferred areas</div>
+                <p className="mb-2 text-xs text-slate-500">
+                  Add in priority order (1 = most preferred). Use arrows to reorder.
+                </p>
                 <GooglePlacesInput
-                  onSelect={(p) => setTenantForm({
-                    ...tenantForm,
-                    workplace_text: [p.area, p.city].filter(Boolean).join(", "),
-                    workplace_lat: p.latitude,
-                    workplace_lng: p.longitude,
-                  })}
-                  placeholder="Office / work area..."
+                  mode="area"
+                  clearOnSelect
+                  locationBias={cityCenter}
+                  onSelect={addLocationAnchor}
+                  placeholder={reqForm.city ? `Area in ${reqForm.city}...` : "Add preferred area..."}
                   className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
                 />
+                {locationAnchors.length > 0 && (
+                  <ul className="mt-2 space-y-2">
+                    {locationAnchors.map((a, index) => (
+                      <li
+                        key={`${a.lat}-${a.lng}-${a.name}`}
+                        className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2"
+                      >
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">
+                          {index + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 text-sm font-medium text-emerald-900">{a.name}</span>
+                        <button
+                          type="button"
+                          aria-label="Move up"
+                          disabled={index === 0}
+                          onClick={() => moveLocationAnchor(index, -1)}
+                          className="rounded-lg p-1.5 text-emerald-800 disabled:opacity-30"
+                        >
+                          <ChevronUp className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Move down"
+                          disabled={index === locationAnchors.length - 1}
+                          onClick={() => moveLocationAnchor(index, 1)}
+                          className="rounded-lg p-1.5 text-emerald-800 disabled:opacity-30"
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${a.name}`}
+                          onClick={() => removeLocationAnchor(index)}
+                          className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-red-600"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <div className="mb-2 text-sm font-medium">Search radius</div>
+                <div className="flex gap-2">
+                  {RADIUS_OPTIONS.map((r) => (
+                    <button
+                      key={r.value}
+                      type="button"
+                      onClick={() => setReqForm({ ...reqForm, search_radius_km: r.value })}
+                      className={`rounded-full px-3 py-1 text-sm ${reqForm.search_radius_km === r.value ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </>
+          )}
+          {!isSupply && (role === "renter" || role === "buyer") && (
+            <div className="border-t border-slate-100 pt-3">
+              <div className="mb-2 text-sm font-medium">Tenant / buyer profile</div>
+              <select
+                className="mb-2 min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+                value={tenantForm.tenant_type}
+                onChange={(e) => setTenantForm({ ...tenantForm, tenant_type: e.target.value })}
+              >
+                <option value="">Tenant type</option>
+                {TENANT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+              <Input
+                placeholder="Number of occupants"
+                type="number"
+                value={tenantForm.occupant_count}
+                onChange={(e) => setTenantForm({ ...tenantForm, occupant_count: e.target.value })}
+              />
+              <Input
+                placeholder="Profession"
+                value={tenantForm.profession}
+                onChange={(e) => setTenantForm({ ...tenantForm, profession: e.target.value })}
+                className="mt-2"
+              />
+              <div className="mt-2 text-sm text-slate-600">Workplace (for location search)</div>
+              <GooglePlacesInput
+                onSelect={(p) => setTenantForm({
+                  ...tenantForm,
+                  workplace_text: [p.area, p.city].filter(Boolean).join(", "),
+                  workplace_lat: p.latitude,
+                  workplace_lng: p.longitude,
+                })}
+                placeholder="Office / work area..."
+                className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+              />
+            </div>
           )}
           <FormSelect
             value={reqForm.bhk}
@@ -531,7 +581,23 @@ export default function LeadsPage() {
             options={BHK_OPTIONS}
             placeholder="Select BHK"
           />
-          {meta.stream === "sales" ? (
+          {isSupply ? (
+            meta.stream === "sales" ? (
+              <Input
+                placeholder="Asking price"
+                type="number"
+                value={reqForm.budget_max}
+                onChange={(e) => setReqForm({ ...reqForm, budget_min: "", budget_max: e.target.value })}
+              />
+            ) : (
+              <Input
+                placeholder="Asking rent / month"
+                type="number"
+                value={reqForm.rent_budget}
+                onChange={(e) => setReqForm({ ...reqForm, rent_budget: e.target.value })}
+              />
+            )
+          ) : meta.stream === "sales" ? (
             <div className="grid grid-cols-2 gap-2">
               <Input placeholder="Budget min" type="number" value={reqForm.budget_min} onChange={(e) => setReqForm({ ...reqForm, budget_min: e.target.value })} />
               <Input placeholder="Budget max" type="number" value={reqForm.budget_max} onChange={(e) => setReqForm({ ...reqForm, budget_max: e.target.value })} />
@@ -544,7 +610,7 @@ export default function LeadsPage() {
             {URGENCY_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
           </select>
           <div>
-            <div className="mb-2 text-sm font-medium">Move-in date</div>
+            <div className="mb-2 text-sm font-medium">{isSupply ? "Available from" : "Move-in date"}</div>
             <Input
               type="date"
               value={reqForm.move_in_date}
@@ -557,7 +623,7 @@ export default function LeadsPage() {
           </select>
           <Textarea placeholder="Notes" value={reqForm.notes} onChange={(e) => setReqForm({ ...reqForm, notes: e.target.value })} />
           <Button className="w-full" disabled={loading} onClick={saveLead}>
-            {loading ? "Saving..." : "Save & find properties"}
+            {loading ? "Saving..." : isSupply ? "Save property lead" : "Save & find properties"}
           </Button>
         </Card>
       )}
