@@ -22,6 +22,7 @@ import {
   STREAM_OPTIONS,
 } from "@/lib/inventory-presets";
 import { validateMediaFiles } from "@/lib/media-validation";
+import { prepareMediaFiles } from "@/lib/compress-video";
 import { digitsOnly, isValidPhone, phoneError } from "@/lib/phone";
 import { AppShell } from "@/components/app-shell";
 import { GooglePlacesInput, type PlaceSelection } from "@/components/google-places-input";
@@ -128,6 +129,8 @@ export default function InventoryAdminPage() {
   const [ownerForm, setOwnerForm] = useState({ name: "", phone: "", email: "", whatsapp: "" });
   const [listingContacts, setListingContacts] = useState<Contact[]>([]);
   const [listingFiles, setListingFiles] = useState<File[]>([]);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaStatus, setMediaStatus] = useState<string | null>(null);
   const [createdListingId, setCreatedListingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -655,31 +658,48 @@ export default function InventoryAdminPage() {
           <label className="block">
             <span className="mb-1 block text-sm font-medium">Photos & videos</span>
             <p className="mb-2 text-xs text-slate-500">
-              Images up to 25 MB (JPG, PNG, WebP, HEIC). Videos up to 50 MB (MP4, MOV, WebM). Max 12 files.
+              Images up to 25 MB. Videos up to 100 MB after compression (large videos are compressed in your browser). Max 12 files.
             </p>
             <input
               type="file"
               multiple
+              disabled={mediaBusy || loading}
               accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov,.webm"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const files = Array.from(e.target.files || []);
-                const err = validateMediaFiles(files);
-                if (err) {
-                  setMessage(err);
-                  setListingFiles([]);
-                } else {
-                  setMessage("");
-                  setListingFiles(files);
-                }
                 e.target.value = "";
+                if (!files.length) return;
+                setMediaBusy(true);
+                setMediaStatus(null);
+                try {
+                  const { files: prepared, error } = await prepareMediaFiles(files, {
+                    onStatus: setMediaStatus,
+                  });
+                  if (error) {
+                    setMessage(error);
+                    setListingFiles([]);
+                  } else {
+                    setMessage("");
+                    setListingFiles(prepared);
+                  }
+                } catch (err) {
+                  setMessage(err instanceof Error ? err.message : "Could not process media");
+                  setListingFiles([]);
+                } finally {
+                  setMediaBusy(false);
+                }
               }}
             />
-            {listingFiles.length > 0 && (
+            {mediaBusy && <p className="mt-1 text-sm text-emerald-700">{mediaStatus || "Processing media…"}</p>}
+            {!mediaBusy && mediaStatus && (
+              <p className="mt-1 text-xs text-slate-500">{mediaStatus}</p>
+            )}
+            {listingFiles.length > 0 && !mediaBusy && (
               <p className="mt-1 text-xs text-slate-500">{listingFiles.length} file(s) selected</p>
             )}
           </label>
           {createdListingId && <p className="text-sm text-emerald-700">Last listing saved</p>}
-          <Button className="w-full" onClick={saveListing} disabled={loading || !(listingForm.project_name || (listingForm.use_project_context && selectedProject)) || !listingForm.bhk}>
+          <Button className="w-full" onClick={saveListing} disabled={loading || mediaBusy || !(listingForm.project_name || (listingForm.use_project_context && selectedProject)) || !listingForm.bhk}>
             Save Listing
           </Button>
         </Card>

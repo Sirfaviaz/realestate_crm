@@ -1,7 +1,11 @@
 /** Matches backend `app.services.storage` limits. */
 export const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+/** Reject source videos larger than this before browser compression (memory). */
+export const MAX_VIDEO_SOURCE_BYTES = 250 * 1024 * 1024;
 export const MAX_MEDIA_FILES = 12;
+/** Compress videos larger than this in the browser before upload. */
+export const VIDEO_COMPRESS_THRESHOLD = 20 * 1024 * 1024;
 
 const IMAGE_TYPES = new Set([
   "image/jpeg",
@@ -29,7 +33,10 @@ export function mediaKind(file: File): MediaKind | null {
 }
 
 /** Returns an error message, or null if all files are valid. */
-export function validateMediaFiles(files: File[]): string | null {
+export function validateMediaFiles(
+  files: File[],
+  opts?: { allowOversizedVideoSource?: boolean }
+): string | null {
   if (files.length > MAX_MEDIA_FILES) {
     return `You can upload up to ${MAX_MEDIA_FILES} files.`;
   }
@@ -38,13 +45,21 @@ export function validateMediaFiles(files: File[]): string | null {
     if (!kind) {
       return `"${file.name}" is not a supported image or video. Use JPG, PNG, WebP, HEIC, MP4, MOV, or WebM.`;
     }
-    const max = kind === "image" ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
-    const label = kind === "image" ? "25 MB" : "50 MB";
-    if (file.size > max) {
-      return `"${file.name}" is too large. Max ${label} for ${kind}s.`;
-    }
     if (file.size === 0) {
       return `"${file.name}" is empty.`;
+    }
+    if (kind === "image") {
+      if (file.size > MAX_IMAGE_BYTES) {
+        return `"${file.name}" is too large. Max 25 MB for images.`;
+      }
+      continue;
+    }
+    if (opts?.allowOversizedVideoSource) {
+      if (file.size > MAX_VIDEO_SOURCE_BYTES) {
+        return `"${file.name}" is too large to compress in the browser (max 250 MB source).`;
+      }
+    } else if (file.size > MAX_VIDEO_BYTES) {
+      return `"${file.name}" is too large. Max 100 MB for videos.`;
     }
   }
   return null;

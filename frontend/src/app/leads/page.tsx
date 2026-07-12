@@ -18,6 +18,7 @@ import {
 } from "@/lib/contact-roles";
 import { BHK_OPTIONS } from "@/lib/inventory-presets";
 import { formatFileSize, mediaKind, validateMediaFiles } from "@/lib/media-validation";
+import { prepareMediaFiles } from "@/lib/compress-video";
 import { digitsOnly, isValidPhone, normalizePhone, phoneError } from "@/lib/phone";
 import { formatPrice } from "@/lib/utils";
 import { AppShell } from "@/components/app-shell";
@@ -76,6 +77,9 @@ export default function LeadsPage() {
   const [preferredTenantTypes, setPreferredTenantTypes] = useState<string[]>([]);
   const [mediaFiles, setMediaFiles] = useState<File[]>([]);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [mediaStatus, setMediaStatus] = useState<string | null>(null);
+  const [mediaProgress, setMediaProgress] = useState<number | null>(null);
+  const [mediaBusy, setMediaBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [savedReqId, setSavedReqId] = useState<string | null>(null);
   const [available, setAvailable] = useState<AvailableNowResponse | null>(null);
@@ -176,18 +180,33 @@ export default function LeadsPage() {
     }
   };
 
-  const onMediaPick = (files: FileList | null) => {
+  const onMediaPick = async (files: FileList | null) => {
     if (!files?.length) return;
-    const next = [...mediaFiles, ...Array.from(files)];
-    const err = validateMediaFiles(next);
-    setMediaError(err);
-    if (!err) setMediaFiles(next);
+    setMediaBusy(true);
+    setMediaError(null);
+    setMediaStatus(null);
+    setMediaProgress(null);
+    try {
+      const combined = [...mediaFiles, ...Array.from(files)];
+      const { files: prepared, error } = await prepareMediaFiles(combined, {
+        onStatus: setMediaStatus,
+        onProgress: setMediaProgress,
+      });
+      setMediaError(error);
+      if (!error) setMediaFiles(prepared);
+    } catch (e) {
+      setMediaError(e instanceof Error ? e.message : "Could not process media files.");
+    } finally {
+      setMediaBusy(false);
+      setMediaProgress(null);
+    }
   };
 
   const removeMediaFile = (index: number) => {
     const next = mediaFiles.filter((_, i) => i !== index);
     setMediaFiles(next);
     setMediaError(next.length ? validateMediaFiles(next) : null);
+    setMediaStatus(null);
   };
 
   const validateSupplyDetails = (): string | null => {
@@ -377,6 +396,9 @@ export default function LeadsPage() {
     setPreferredTenantTypes([]);
     setMediaFiles([]);
     setMediaError(null);
+    setMediaStatus(null);
+    setMediaProgress(null);
+    setMediaBusy(false);
     setFormError(null);
     setSavedReqId(null);
     setAvailable(null);
@@ -833,19 +855,30 @@ export default function LeadsPage() {
             <div>
               <div className="mb-2 text-sm font-medium">Photos & videos *</div>
               <p className="mb-2 text-xs text-slate-500">
-                At least one photo required. Images up to 25 MB (JPG, PNG, WebP, HEIC). Videos up to 50 MB (MP4, MOV, WebM). Max 12 files.
+                At least one photo required. Images up to 25 MB. Videos up to 100 MB after compression
+                (large videos are compressed in your browser automatically). Max 12 files.
               </p>
               <input
                 type="file"
                 multiple
+                disabled={mediaBusy}
                 required={mediaFiles.length === 0}
                 accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov,.webm"
-                className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-emerald-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white"
+                className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-emerald-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white disabled:opacity-50"
                 onChange={(e) => {
-                  onMediaPick(e.target.files);
+                  void onMediaPick(e.target.files);
                   e.target.value = "";
                 }}
               />
+              {mediaBusy && (
+                <p className="mt-2 text-sm text-emerald-700">
+                  {mediaStatus || "Processing media…"}
+                  {mediaProgress != null ? ` ${Math.round(mediaProgress * 100)}%` : ""}
+                </p>
+              )}
+              {!mediaBusy && mediaStatus && !mediaError && (
+                <p className="mt-2 text-sm text-slate-600">{mediaStatus}</p>
+              )}
               {mediaError && <p className="mt-2 text-sm text-red-600">{mediaError}</p>}
               {mediaFiles.length > 0 && (
                 <ul className="mt-2 space-y-2">
@@ -904,7 +937,7 @@ export default function LeadsPage() {
           </select>
           <Textarea placeholder="Notes (optional)" value={reqForm.notes} onChange={(e) => setReqForm({ ...reqForm, notes: e.target.value })} />
           {formError && <p className="text-sm text-red-600">{formError}</p>}
-          <Button className="w-full" disabled={loading || !!mediaError} onClick={saveLead}>
+          <Button className="w-full" disabled={loading || mediaBusy || !!mediaError} onClick={saveLead}>
             {loading
               ? "Saving..."
               : role === "landlord"
