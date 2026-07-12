@@ -30,28 +30,41 @@ def _contact_dict(c: Contact) -> dict:
 
 
 def _match_dict(m: RequirementMatch) -> dict:
-    info = {"title": None, "location": None, "bhk": None, "price": None, "property_type": None}
-    contact = None
+    """Dashboard card: lead to inform + what they matched against."""
+    lead = m.requirement.contact if m.requirement else None
+    lead_role = m.requirement.role if m.requirement else None
     matched_role = None
+    matched_name = None
+    info = {"title": None, "location": None, "bhk": None, "price": None, "property_type": None}
+
     if m.matched_requirement and m.matched_requirement.contact:
         other = m.matched_requirement
-        c = other.contact
+        oc = other.contact
+        matched_role = other.role
+        matched_name = oc.name
         locs = other.preferred_locations or []
         location = ", ".join(locs) if locs else other.city
         price = other.rent_budget if other.stream_type == "rental" else (other.budget_max or other.budget_min)
+        types = other.property_types or []
+        type_label = types[0] if types else None
         if other.role in ("landlord", "seller"):
-            title = f"{c.name}'s property"
+            bits = [other.bhk, type_label, location]
+            info = {
+                "title": f"Property: {' · '.join(str(b) for b in bits if b)}",
+                "location": location,
+                "bhk": other.bhk,
+                "price": price,
+                "property_type": type_label,
+            }
         else:
-            title = f"{c.name} looking for {other.bhk or 'property'}"
-        info = {
-            "title": title,
-            "location": location,
-            "bhk": other.bhk,
-            "price": price,
-            "property_type": (other.property_types or [None])[0],
-        }
-        contact = c
-        matched_role = other.role
+            bits = [other.bhk or "property", location]
+            info = {
+                "title": f"Looking for {' in '.join(str(b) for b in bits if b)}",
+                "location": location,
+                "bhk": other.bhk,
+                "price": price,
+                "property_type": type_label,
+            }
     elif m.listing:
         info = {
             "title": m.listing.title,
@@ -60,7 +73,7 @@ def _match_dict(m: RequirementMatch) -> dict:
             "price": m.listing.price,
             "property_type": m.listing.property_type,
         }
-        contact = m.listing.contact
+        matched_name = m.listing.contact.name if m.listing.contact else None
     elif m.spec and m.spec.option:
         spec = m.spec
         opt = spec.option
@@ -72,18 +85,19 @@ def _match_dict(m: RequirementMatch) -> dict:
             "bhk": opt.configuration,
             "price": spec.rent_price or spec.sale_price,
         }
-    if contact is None and m.requirement:
-        contact = m.requirement.contact
+
     return {
         "id": str(m.id),
         "requirement_id": str(m.requirement_id),
         "status": m.status,
         "match_score": m.match_score,
-        "contact_name": contact.name if contact else None,
-        "contact_phone": contact.phone if contact else None,
-        "contact_whatsapp": (contact.whatsapp or contact.phone) if contact else None,
-        "requirement_role": m.requirement.role if m.requirement else None,
+        # Person to inform (the lead this match belongs to)
+        "contact_name": lead.name if lead else None,
+        "contact_phone": lead.phone if lead else None,
+        "contact_whatsapp": (lead.whatsapp or lead.phone) if lead else None,
+        "requirement_role": lead_role,
         "matched_role": matched_role,
+        "matched_name": matched_name,
         **info,
     }
 

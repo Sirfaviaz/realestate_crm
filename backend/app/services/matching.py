@@ -151,37 +151,64 @@ def _leads_location_ok(
     b: LeadRequirement,
     b_contact: Contact,
 ) -> tuple[bool, float | None]:
-    if a.city and b.city and _norm(a.city) == _norm(b.city):
-        return True, None
-
+    """Require a real location link — never match across unrelated cities/areas."""
+    a_city = _norm(a.city)
+    b_city = _norm(b.city)
     a_locs = {_norm(x) for x in (a.preferred_locations or []) if x}
     b_locs = {_norm(x) for x in (b.preferred_locations or []) if x}
-    if a_locs and b_locs and (a_locs & b_locs):
-        return True, None
-    if a.city and b_locs and _norm(a.city) in b_locs:
-        return True, None
-    if b.city and a_locs and _norm(b.city) in a_locs:
-        return True, None
-
     a_anchors = build_anchors(a, a_contact)
     b_anchors = build_anchors(b, b_contact)
+
+    # Different cities never match.
+    if a_city and b_city and a_city != b_city:
+        return False, None
+
+    # Same city is enough for a candidate (radius/areas refine score elsewhere).
+    if a_city and b_city and a_city == b_city:
+        if a_anchors and b_anchors:
+            dists = [
+                haversine_km(aa["lat"], aa["lng"], bb["lat"], bb["lng"])
+                for aa in a_anchors
+                for bb in b_anchors
+                if aa.get("lat") is not None and bb.get("lat") is not None
+            ]
+            if dists:
+                dist = min(dists)
+                # Whole-city mode: same city already confirmed.
+                if a.search_radius_km == 0 or b.search_radius_km == 0:
+                    return True, dist
+                radius = max(a.search_radius_km or 5.0, b.search_radius_km or 5.0, 10.0)
+                return dist <= radius, dist
+        return True, None
+
+    # Exact preferred-area overlap (e.g. both "Palazhi").
+    if a_locs and b_locs and (a_locs & b_locs):
+        return True, None
+
+    # City name appears in the other side's preferred areas.
+    if a_city and a_city in b_locs:
+        return True, None
+    if b_city and b_city in a_locs:
+        return True, None
+
+    # Lat/lng anchors within radius — only when we don't already know cities conflict.
     if a_anchors and b_anchors:
-        dists: list[float] = []
-        for aa in a_anchors:
-            for bb in b_anchors:
-                if aa.get("lat") is None or bb.get("lat") is None:
-                    continue
-                dists.append(haversine_km(aa["lat"], aa["lng"], bb["lat"], bb["lng"]))
+        dists = [
+            haversine_km(aa["lat"], aa["lng"], bb["lat"], bb["lng"])
+            for aa in a_anchors
+            for bb in b_anchors
+            if aa.get("lat") is not None and bb.get("lat") is not None
+        ]
         if dists:
             dist = min(dists)
-            radius = max(a.search_radius_km or 5.0, b.search_radius_km or 5.0, 10.0)
+            # Do not treat "whole city" as unlimited when cities are unknown/different.
             if a.search_radius_km == 0 or b.search_radius_km == 0:
-                return True, dist
+                return False, dist
+            radius = max(a.search_radius_km or 5.0, b.search_radius_km or 5.0, 10.0)
             return dist <= radius, dist
 
-    if a.city and b.city and _norm(a.city) != _norm(b.city):
-        return False, None
-    return True, None
+    # One or both sides have location signals but nothing overlaps → no match.
+    return False, None
 
 
 def _leads_compatible(
@@ -501,6 +528,7 @@ async def match_requirement(db: AsyncSession, requirement_id: UUID) -> int:
 
     available = await find_available_properties(db, requirement_id)
     created = 0
+    valid_lead_ids: set[UUID] = set()
     for key in ("within_radius", "within_10km", "in_city"):
         for item in available.get(key, []):
             listing_id = UUID(item["listing_id"]) if item.get("listing_id") else None
@@ -524,6 +552,7 @@ async def match_requirement(db: AsyncSession, requirement_id: UUID) -> int:
 
             # Mirror lead↔lead matches onto the counterpart requirement.
             if matched_req_id:
+                valid_lead_ids.add(matched_req_id)
                 reverse = await _upsert_match(
                     db,
                     matched_req_id,
@@ -537,6 +566,31 @@ async def match_requirement(db: AsyncSession, requirement_id: UUID) -> int:
                 ).scalar_one_or_none()
                 if other and other.status == "active":
                     other.status = "matched"
+
+    # Drop false-positive lead matches that no longer pass location rules.
+    stale = (
+        await db.execute(
+            select(RequirementMatch).where(
+                RequirementMatch.requirement_id == req.id,
+                RequirementMatch.matched_requirement_id.isnot(None),
+                RequirementMatch.status == "new",
+            )
+        )
+    ).scalars().all()
+    for old in stale:
+        if old.matched_requirement_id not in valid_lead_ids:
+            old.status = "rejected"
+            mirror = (
+                await db.execute(
+                    select(RequirementMatch).where(
+                        RequirementMatch.requirement_id == old.matched_requirement_id,
+                        RequirementMatch.matched_requirement_id == req.id,
+                        RequirementMatch.status == "new",
+                    )
+                )
+            ).scalar_one_or_none()
+            if mirror:
+                mirror.status = "rejected"
 
     if created > 0 and req.status == "active":
         req.status = "matched"

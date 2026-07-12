@@ -201,17 +201,34 @@ function ContactCard({
 }
 
 function MatchCard({ match }: { match: DashboardMatch }) {
+  const stream =
+    match.requirement_role === "renter" || match.requirement_role === "landlord"
+      ? "rental"
+      : "sales";
+  const matchedLabel =
+    match.matched_role === "landlord" || match.matched_role === "seller"
+      ? "Matched property"
+      : match.matched_role === "renter" || match.matched_role === "buyer"
+        ? "Matched with"
+        : "Match";
+
   return (
     <Link href={`/leads/${match.requirement_id}`}>
       <Card className="border-violet-200 bg-violet-50/50 hover:border-violet-300">
         <div className="font-semibold">{match.contact_name}</div>
-        <div className="text-sm text-slate-600">{match.title}</div>
-        <div className="text-sm">{match.location}</div>
+        {match.requirement_role && (
+          <div className="text-xs text-slate-500">{roleLabel(match.requirement_role)} to inform</div>
+        )}
+        <div className="mt-2 text-sm font-medium text-slate-800">
+          {matchedLabel}
+          {match.matched_name ? `: ${match.matched_name}` : ""}
+        </div>
+        {match.title && <div className="text-sm text-slate-600">{match.title}</div>}
+        {match.location && <div className="text-sm text-slate-600">{match.location}</div>}
         {match.price != null && (
-          <div className="text-sm font-medium">{formatPrice(match.price, match.requirement_role === "renter" ? "rental" : "sales")}</div>
+          <div className="text-sm font-medium">{formatPrice(match.price, stream)}</div>
         )}
         <div className="mt-1 flex gap-1">
-          {match.requirement_role && <Badge>{roleLabel(match.requirement_role)}</Badge>}
           {match.matched_role && <Badge>{roleLabel(match.matched_role)}</Badge>}
           {match.bhk && <Badge>{match.bhk}</Badge>}
         </div>

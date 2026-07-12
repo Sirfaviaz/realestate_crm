@@ -161,6 +161,7 @@ export type DashboardMatch = {
   contact_whatsapp?: string | null;
   requirement_role?: string | null;
   matched_role?: string | null;
+  matched_name?: string | null;
   title?: string | null;
   location?: string | null;
   bhk?: string | null;
