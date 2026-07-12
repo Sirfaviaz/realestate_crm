@@ -376,6 +376,7 @@ function RequirementSummary({ req }: { req: LeadRequirement }) {
         {isSupply ? "Listing lead" : "Search"} · {roleLabel(req.role)}
         {req.bhk ? ` · ${req.bhk}` : ""}
         {typeLabel ? ` · ${typeLabel}` : ""}
+        {req.status !== "active" && req.status !== "matched" ? ` · ${req.status}` : ""}
       </div>
       {areas && <div>{isSupply ? "Area" : "Areas"}: {areas}</div>}
       {budget && <div>{isSupply ? (req.stream_type === "rental" ? "Rent" : "Price") : "Budget"}: {budget}</div>}
