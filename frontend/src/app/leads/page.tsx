@@ -539,7 +539,14 @@ export default function LeadsPage() {
           ) : (
             <Input placeholder="Rent budget / month" type="number" value={reqForm.rent_budget} onChange={(e) => setReqForm({ ...reqForm, rent_budget: e.target.value })} />
           )}
-          <Input type="date" value={reqForm.move_in_date} onChange={(e) => setReqForm({ ...reqForm, move_in_date: e.target.value })} />
+          <div>
+            <div className="mb-2 text-sm font-medium">Move-in date</div>
+            <Input
+              type="date"
+              value={reqForm.move_in_date}
+              onChange={(e) => setReqForm({ ...reqForm, move_in_date: e.target.value })}
+            />
+          </div>
           <select className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" value={reqForm.urgency} onChange={(e) => setReqForm({ ...reqForm, urgency: e.target.value })}>
             <option value="">Urgency</option>
             {URGENCY_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
