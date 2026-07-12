@@ -18,7 +18,8 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-python seed.py
+python seed.py --admin-only   # admin account only (recommended)
+# python seed.py --demo       # optional: admin + sample inventory
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -32,12 +33,31 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
-### Demo accounts
+### Accounts
 
-| Email | Password | Role |
-|-------|----------|------|
-| admin@example.com | admin123 | Admin — user management & full access |
-| user@example.com | user123 | User — calls, people, properties, import, listings |
+**Admin-only seed** (default): creates one admin from env (or defaults below). Create team users in **Admin → Users**.
+
+| Variable | Default |
+|----------|---------|
+| `SEED_ADMIN_EMAIL` | `admin@example.com` |
+| `SEED_ADMIN_PASSWORD` | `admin123` |
+| `SEED_ADMIN_NAME` | `Admin User` |
+| `SEED_ADMIN_PHONE` | _(empty)_ |
+
+**Demo seed** (`python seed.py --demo`): also creates `user@example.com` / `user123` plus sample inventory.
+
+### Oracle VM — wipe DB and seed admin only
+
+```bash
+cd ~/realestate_crm
+git pull
+# Put SEED_ADMIN_* in docker-compose.oracle.yml (see docker-compose.oracle.yml.example)
+docker compose -f docker-compose.oracle.yml down -v   # DESTROYS all DB data
+docker compose -f docker-compose.oracle.yml up -d --build
+docker compose -f docker-compose.oracle.yml exec backend python seed.py --admin-only
+```
+
+Then log in with `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, open **Admin → Users**, and create real team accounts.
 
 ## Features
 
