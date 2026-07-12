@@ -57,6 +57,7 @@ MIGRATIONS = [
     "ALTER TABLE listings ADD COLUMN IF NOT EXISTS price_as_of_date DATE",
     "ALTER TABLE listings ADD COLUMN IF NOT EXISTS monthly_rent DOUBLE PRECISION",
     "ALTER TABLE listings ADD COLUMN IF NOT EXISTS security_deposit DOUBLE PRECISION",
+    "ALTER TABLE lead_requirements ADD COLUMN IF NOT EXISTS listing_id UUID REFERENCES listings(id)",
 ]
 
 
@@ -121,3 +122,10 @@ async def run_migrations() -> None:
         await migrate_contact_requirements()
     except Exception as exc:
         logger.debug("Contact requirement migration skipped: %s", exc)
+    try:
+        from app.services.listing_sync import sync_listings_from_supply_leads
+
+        async with AsyncSessionLocal() as db:
+            await sync_listings_from_supply_leads(db)
+    except Exception as exc:
+        logger.debug("Supply listing sync skipped: %s", exc)

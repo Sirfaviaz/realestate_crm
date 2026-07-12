@@ -356,6 +356,7 @@ class LeadRequirementCreate(BaseModel):
     status: str = "active"
     notes: str | None = None
     preferred_tenant_types: list[str] | None = None
+    listing_id: UUID | None = None
     assigned_user_id: UUID | None = None
 
 

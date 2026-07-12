@@ -14,6 +14,7 @@ from app.models.listing import Listing, ListingMedia
 from app.models.user import User
 from app.schemas import ListingCreate, ListingMediaResponse, ListingResponse
 from app.services.matching import match_all_active
+from app.services.listing_sync import sync_listings_from_supply_leads
 from app.services.storage import resolve_media_path, save_upload
 
 router = APIRouter(prefix="/listings", tags=["listings"])
@@ -42,6 +43,15 @@ def _listing_url(listing: Listing) -> ListingResponse:
     return data
 
 
+@router.post("/sync-from-leads")
+async def sync_from_leads(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.USER)),
+):
+    """Create/link inventory listings for landlord & seller leads that are missing one."""
+    return await sync_listings_from_supply_leads(db)
+
+
 @router.get("", response_model=list[ListingResponse])
 async def list_listings(
     stream_type: str | None = None,
@@ -50,9 +60,12 @@ async def list_listings(
     bhk: str | None = None,
     min_price: float | None = None,
     max_price: float | None = None,
+    sync: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
+    if sync:
+        await sync_listings_from_supply_leads(db)
     stmt = select(Listing).options(selectinload(Listing.media), selectinload(Listing.contact)).where(Listing.status == "available")
     if stream_type:
         stmt = stmt.where(Listing.stream_type == stream_type)

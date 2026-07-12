@@ -17,7 +17,7 @@ export default function PropertiesPage() {
   useEffect(() => {
     setLoading(true);
     listingsApi
-      .list({ q: query || undefined, stream_type: stream || undefined })
+      .list({ q: query || undefined, stream_type: stream || undefined, sync: true })
       .then(setListings)
       .finally(() => setLoading(false));
   }, [query, stream]);
@@ -59,7 +59,7 @@ export default function PropertiesPage() {
             <Button className="w-full">Add property</Button>
           </Link>
           <p className="text-center text-xs text-slate-500">
-            Landlord/seller leads are tracked under Leads. Use Add property when you want a photo listing in inventory.
+            Landlord/seller leads sync into Properties automatically. Add photos when creating the lead for cover images.
           </p>
         </div>
       ) : (

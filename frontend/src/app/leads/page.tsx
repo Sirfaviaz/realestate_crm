@@ -351,6 +351,29 @@ export default function LeadsPage() {
         for (let i = 0; i < mediaFiles.length; i++) {
           await listingsApi.uploadMedia(listing.id, mediaFiles[i], i);
         }
+        await requirementsApi.update(req.id, {
+          contact_id: contactId,
+          role,
+          stream_type: meta.stream,
+          property_types: req.property_types || undefined,
+          preferred_locations: req.preferred_locations || undefined,
+          location_anchors: req.location_anchors || undefined,
+          city: req.city || undefined,
+          search_radius_km: req.search_radius_km ?? undefined,
+          bhk: req.bhk || undefined,
+          budget_min: req.budget_min ?? undefined,
+          budget_max: req.budget_max ?? undefined,
+          rent_budget: req.rent_budget ?? undefined,
+          security_deposit: req.security_deposit ?? undefined,
+          maintenance: req.maintenance ?? undefined,
+          move_in_date: req.move_in_date || undefined,
+          urgency: req.urgency || undefined,
+          lead_score: req.lead_score || undefined,
+          notes: req.notes || undefined,
+          preferred_tenant_types: req.preferred_tenant_types,
+          listing_id: listing.id,
+          status: req.status,
+        });
       }
 
       const avail = await requirementsApi.availableNow(req.id);

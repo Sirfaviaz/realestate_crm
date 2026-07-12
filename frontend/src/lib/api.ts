@@ -190,6 +190,7 @@ export type LeadRequirement = {
   lead_score?: string | null;
   status: string;
   notes?: string | null;
+  listing_id?: string | null;
   preferred_tenant_types?: string[] | null;
   contact_name?: string | null;
   contact_phone?: string | null;
@@ -528,7 +529,7 @@ export const searchApi = {
 };
 
 export const listingsApi = {
-  list: (params?: { stream_type?: string; contact_id?: string; q?: string; bhk?: string; min_price?: number; max_price?: number }) => {
+  list: (params?: { stream_type?: string; contact_id?: string; q?: string; bhk?: string; min_price?: number; max_price?: number; sync?: boolean }) => {
     const qs = new URLSearchParams();
     if (params?.stream_type) qs.set("stream_type", params.stream_type);
     if (params?.contact_id) qs.set("contact_id", params.contact_id);
@@ -536,12 +537,15 @@ export const listingsApi = {
     if (params?.bhk) qs.set("bhk", params.bhk);
     if (params?.min_price != null) qs.set("min_price", String(params.min_price));
     if (params?.max_price != null) qs.set("max_price", String(params.max_price));
+    if (params?.sync) qs.set("sync", "true");
     const q = qs.toString();
     return api<Listing[]>(`/listings${q ? `?${q}` : ""}`);
   },
   get: (id: string) => api<Listing>(`/listings/${id}`),
   create: (data: Partial<Listing>) =>
     api<Listing>("/listings", { method: "POST", body: JSON.stringify(data) }),
+  syncFromLeads: () =>
+    api<{ linked: number; created: number }>("/listings/sync-from-leads", { method: "POST" }),
   uploadMedia: (listingId: string, file: File, sortOrder = 0) => {
     const fd = new FormData();
     fd.append("file", file);
