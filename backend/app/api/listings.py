@@ -14,6 +14,7 @@ from app.models.listing import Listing, ListingMedia
 from app.models.user import User
 from app.models.requirement import LeadRequirement
 from app.schemas import ListingCreate, ListingMediaResponse, ListingResponse, ListingUpdate
+from app.services.geo import haversine_km
 from app.services.matching import match_all_active
 from app.services.listing_sync import sync_listings_from_supply_leads
 from app.services.storage import resolve_media_path, save_upload
@@ -23,10 +24,11 @@ router = APIRouter(prefix="/listings", tags=["listings"])
 LISTING_STATUSES = {"available", "unavailable", "hold", "sold", "rented"}
 
 
-def _listing_url(listing: Listing) -> ListingResponse:
+def _listing_url(listing: Listing, *, distance_km: float | None = None) -> ListingResponse:
     cover = listing.media[0].file_path if listing.media else None
     data = ListingResponse.model_validate(listing)
     data.cover_url = f"/listings/media/{cover}" if cover else None
+    data.distance_km = round(distance_km, 1) if distance_km is not None else None
     if listing.contact:
         data.contact_name = listing.contact.name
         data.contact_phone = listing.contact.phone
@@ -68,12 +70,19 @@ async def list_listings(
     bhk: str | None = None,
     min_price: float | None = None,
     max_price: float | None = None,
+    lat: float | None = Query(None, description="Search center latitude for nearby filter"),
+    lng: float | None = Query(None, description="Search center longitude for nearby filter"),
+    radius_km: float | None = Query(None, ge=0.1, le=100, description="Only listings within this radius of lat/lng"),
     sync: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     if sync:
         await sync_listings_from_supply_leads(db)
+    nearby = radius_km is not None and lat is not None and lng is not None
+    if radius_km is not None and (lat is None or lng is None):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "lat and lng are required when using radius_km")
+
     stmt = select(Listing).options(selectinload(Listing.media), selectinload(Listing.contact))
     status_filter = listing_status
     if status_filter is None:
@@ -100,9 +109,32 @@ async def list_listings(
         stmt = stmt.where(Listing.price >= min_price)
     if max_price is not None:
         stmt = stmt.where(Listing.price <= max_price)
-    stmt = stmt.order_by(Listing.updated_at.desc()).limit(100)
+    if nearby:
+        # Only consider listings with coordinates; coarse bbox then exact haversine.
+        # ~1 deg lat ≈ 111 km
+        deg = float(radius_km) / 111.0
+        stmt = stmt.where(
+            Listing.latitude.is_not(None),
+            Listing.longitude.is_not(None),
+            Listing.latitude.between(lat - deg, lat + deg),
+            Listing.longitude.between(lng - deg, lng + deg),
+        )
+    stmt = stmt.order_by(Listing.updated_at.desc()).limit(300 if nearby else 100)
     result = await db.execute(stmt)
-    return [_listing_url(x) for x in result.scalars().all()]
+    rows = list(result.scalars().all())
+
+    if nearby:
+        scored: list[tuple[float, Listing]] = []
+        for listing in rows:
+            if listing.latitude is None or listing.longitude is None:
+                continue
+            dist = haversine_km(lat, lng, listing.latitude, listing.longitude)
+            if dist <= float(radius_km):
+                scored.append((dist, listing))
+        scored.sort(key=lambda x: x[0])
+        return [_listing_url(listing, distance_km=dist) for dist, listing in scored[:100]]
+
+    return [_listing_url(x) for x in rows]
 
 
 @router.get("/media/{file_path:path}")

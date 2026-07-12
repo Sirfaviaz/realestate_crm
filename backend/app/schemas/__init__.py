@@ -356,6 +356,7 @@ class ListingResponse(ListingCreate):
     contact_phone: str | None = None
     contact_whatsapp: str | None = None
     media: list[ListingMediaResponse] = Field(default_factory=list)
+    distance_km: float | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

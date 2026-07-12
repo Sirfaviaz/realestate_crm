@@ -2,34 +2,76 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { LocateFixed, Plus } from "lucide-react";
 import { listingsApi, mediaUrl, type Listing } from "@/lib/api";
 import { formatPrice } from "@/lib/utils";
 import { listingStatusLabel } from "@/components/status-pills";
+import { GooglePlacesInput } from "@/components/google-places-input";
 import { AppShell } from "@/components/app-shell";
 import { Badge, Button, Card, EmptyState, Input, LoadingSpinner } from "@/components/ui";
 
 type StatusFilter = "available" | "unavailable" | "all";
+
+const RADIUS_OPTIONS: { value: number | null; label: string }[] = [
+  { value: null, label: "Any distance" },
+  { value: 2, label: "2 km" },
+  { value: 5, label: "5 km" },
+  { value: 10, label: "10 km" },
+  { value: 20, label: "20 km" },
+];
 
 export default function PropertiesPage() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [query, setQuery] = useState("");
   const [stream, setStream] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("available");
+  const [radiusKm, setRadiusKm] = useState<number | null>(null);
+  const [near, setNear] = useState<{ lat: number; lng: number; label: string } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [nearError, setNearError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setNearError("Location not supported on this device");
+      return;
+    }
+    setLocating(true);
+    setNearError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setNear({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          label: "Current location",
+        });
+        if (radiusKm == null) setRadiusKm(5);
+        setLocating(false);
+      },
+      (err) => {
+        setNearError(err.message || "Could not get current location");
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  };
 
   useEffect(() => {
     setLoading(true);
+    const nearby = radiusKm != null && near != null;
     listingsApi
       .list({
         q: query || undefined,
         stream_type: stream || undefined,
         status: statusFilter,
         sync: true,
+        lat: nearby ? near.lat : undefined,
+        lng: nearby ? near.lng : undefined,
+        radius_km: nearby ? radiusKm : undefined,
       })
       .then(setListings)
       .finally(() => setLoading(false));
-  }, [query, stream, statusFilter]);
+  }, [query, stream, statusFilter, radiusKm, near]);
 
   return (
     <AppShell>
@@ -47,6 +89,78 @@ export default function PropertiesPage() {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
+
+      <div className="mb-2">
+        <div className="mb-1.5 text-xs font-medium text-slate-500">Nearby radius</div>
+        <div className="flex gap-2 overflow-x-auto">
+          {RADIUS_OPTIONS.map((r) => (
+            <button
+              key={r.label}
+              type="button"
+              onClick={() => {
+                setRadiusKm(r.value);
+                if (r.value != null && !near) useCurrentLocation();
+              }}
+              className={`shrink-0 rounded-full px-3 py-1 text-sm ${
+                radiusKm === r.value ? "bg-emerald-600 text-white" : "bg-slate-100"
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {radiusKm != null && (
+        <div className="mb-3 space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={useCurrentLocation}
+              disabled={locating}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 disabled:opacity-50"
+            >
+              <LocateFixed className="h-4 w-4" />
+              {locating ? "Locating…" : "Near me"}
+            </button>
+            {near && (
+              <span className="inline-flex min-h-10 items-center rounded-xl bg-emerald-50 px-3 text-sm text-emerald-900">
+                {near.label}
+                <button
+                  type="button"
+                  className="ml-2 text-emerald-700 underline"
+                  onClick={() => setNear(null)}
+                >
+                  Clear
+                </button>
+              </span>
+            )}
+          </div>
+          <GooglePlacesInput
+            mode="area"
+            clearOnSelect
+            placeholder="Or search a place to search near…"
+            className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+            onSelect={(p) => {
+              if (p.latitude == null || p.longitude == null) {
+                setNearError("That place has no coordinates");
+                return;
+              }
+              setNearError(null);
+              setNear({
+                lat: p.latitude,
+                lng: p.longitude,
+                label: [p.area, p.city].filter(Boolean).join(", ") || "Selected place",
+              });
+            }}
+          />
+          {nearError && <p className="text-sm text-red-600">{nearError}</p>}
+          {!near && !locating && (
+            <p className="text-xs text-amber-700">Choose Near me or a place to filter by radius.</p>
+          )}
+        </div>
+      )}
+
       <div className="mb-2 flex gap-2 overflow-x-auto">
         {(["", "sales", "rental"] as const).map((s) => (
           <button
@@ -83,17 +197,16 @@ export default function PropertiesPage() {
         <div className="space-y-4">
           <EmptyState
             message={
-              statusFilter === "available"
-                ? "No available properties. Add one, or check Unavailable."
-                : "No properties for this filter."
+              radiusKm != null && near
+                ? `No properties within ${radiusKm} km of ${near.label}.`
+                : statusFilter === "available"
+                  ? "No available properties. Add one, or check Unavailable."
+                  : "No properties for this filter."
             }
           />
           <Link href="/listings/new" className="block">
             <Button className="w-full">Add property</Button>
           </Link>
-          <p className="text-center text-xs text-slate-500">
-            Pick an existing landlord/seller to add another property under the same person.
-          </p>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3">
@@ -117,6 +230,9 @@ export default function PropertiesPage() {
                   <div className="mt-1 flex flex-wrap gap-1">
                     {l.bhk && <Badge>{l.bhk}</Badge>}
                     <Badge className="capitalize">{l.stream_type === "sales" ? "Sale" : "Rent"}</Badge>
+                    {l.distance_km != null && (
+                      <Badge className="bg-sky-100 text-sky-900">{l.distance_km} km</Badge>
+                    )}
                     {l.status !== "available" && (
                       <Badge className="bg-amber-100 text-amber-900">{listingStatusLabel(l.status)}</Badge>
                     )}

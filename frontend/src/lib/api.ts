@@ -303,6 +303,7 @@ export type Listing = {
   contact_phone?: string | null;
   contact_whatsapp?: string | null;
   media?: ListingMedia[];
+  distance_km?: number | null;
   created_at: string;
 };
 
@@ -556,6 +557,9 @@ export const listingsApi = {
     bhk?: string;
     min_price?: number;
     max_price?: number;
+    lat?: number;
+    lng?: number;
+    radius_km?: number;
     sync?: boolean;
   }) => {
     const qs = new URLSearchParams();
@@ -566,6 +570,9 @@ export const listingsApi = {
     if (params?.bhk) qs.set("bhk", params.bhk);
     if (params?.min_price != null) qs.set("min_price", String(params.min_price));
     if (params?.max_price != null) qs.set("max_price", String(params.max_price));
+    if (params?.lat != null) qs.set("lat", String(params.lat));
+    if (params?.lng != null) qs.set("lng", String(params.lng));
+    if (params?.radius_km != null) qs.set("radius_km", String(params.radius_km));
     if (params?.sync) qs.set("sync", "true");
     const q = qs.toString();
     return api<Listing[]>(`/listings${q ? `?${q}` : ""}`);
