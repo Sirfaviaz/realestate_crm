@@ -26,6 +26,8 @@ class LeadRequirement(Base):
     budget_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     budget_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     rent_budget: Mapped[float | None] = mapped_column(Float, nullable=True)
+    security_deposit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    maintenance: Mapped[float | None] = mapped_column(Float, nullable=True)
     move_in_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     urgency: Mapped[str | None] = mapped_column(String(32), nullable=True)
     lead_score: Mapped[str | None] = mapped_column(String(32), nullable=True)

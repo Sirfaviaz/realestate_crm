@@ -43,7 +43,7 @@ export default function ListingDetailPage() {
   return (
     <AppShell>
       <Link href="/listings" className="mb-3 flex items-center gap-1 text-sm text-slate-600">
-        <ChevronLeft className="h-4 w-4" /> Back to listings
+        <ChevronLeft className="h-4 w-4" /> Back to Properties
       </Link>
 
       <Card className="mb-4 overflow-hidden p-0">
@@ -89,6 +89,13 @@ export default function ListingDetailPage() {
         {listing.sqft && <Badge>{formatSqft(listing.sqft)}</Badge>}
         <Badge className="capitalize">{listing.status}</Badge>
       </div>
+      {listing.stream_type === "rental" && (
+        <div className="mb-4 space-y-1 text-sm text-slate-600">
+          {listing.monthly_rent != null && <div>Rent: {formatPrice(listing.monthly_rent, "rental")}</div>}
+          {listing.security_deposit != null && <div>Deposit: {formatPrice(listing.security_deposit, "sales")}</div>}
+          {listing.maintenance != null && <div>Maintenance: {formatPrice(listing.maintenance, "rental")}</div>}
+        </div>
+      )}
       {listing.description && <p className="mb-4 text-sm text-slate-600">{listing.description}</p>}
 
       {listing.contact_whatsapp && (

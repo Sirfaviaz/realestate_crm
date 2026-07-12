@@ -294,6 +294,7 @@ class ListingCreate(BaseModel):
     price_as_of_date: date | None = None
     monthly_rent: float | None = None
     security_deposit: float | None = None
+    maintenance: float | None = None
     status: str = "available"
     description: str | None = None
 
@@ -347,6 +348,8 @@ class LeadRequirementCreate(BaseModel):
     budget_min: float | None = None
     budget_max: float | None = None
     rent_budget: float | None = None
+    security_deposit: float | None = None
+    maintenance: float | None = None
     move_in_date: date | None = None
     urgency: str | None = None
     lead_score: str | None = None

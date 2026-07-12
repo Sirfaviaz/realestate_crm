@@ -244,10 +244,23 @@ export default function RequirementDetailPage() {
             </div>
           )}
           {req.stream_type === "rental" && req.rent_budget != null && (
-            <div>Budget: {formatPrice(req.rent_budget, "rental")}</div>
+            <div>
+              {req.role === "landlord" ? "Asking rent" : "Budget"}: {formatPrice(req.rent_budget, "rental")}
+            </div>
+          )}
+          {req.role === "landlord" && req.security_deposit != null && (
+            <div>Deposit: {formatPrice(req.security_deposit, "sales")}</div>
+          )}
+          {req.role === "landlord" && req.maintenance != null && (
+            <div>Maintenance: {formatPrice(req.maintenance, "rental")}</div>
           )}
           {req.stream_type === "sales" && (req.budget_min || req.budget_max) && (
-            <div>Budget: {formatPrice(req.budget_min, "sales")} – {formatPrice(req.budget_max, "sales")}</div>
+            <div>
+              {req.role === "seller" ? "Asking price" : "Budget"}:{" "}
+              {req.role === "seller" && req.budget_max != null && !req.budget_min
+                ? formatPrice(req.budget_max, "sales")
+                : `${formatPrice(req.budget_min, "sales")} – ${formatPrice(req.budget_max, "sales")}`}
+            </div>
           )}
           {req.notes && <div className="italic">{req.notes}</div>}
         </div>

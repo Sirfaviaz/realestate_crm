@@ -21,6 +21,7 @@ import {
   PROPERTY_TYPE_OPTIONS,
   STREAM_OPTIONS,
 } from "@/lib/inventory-presets";
+import { validateMediaFiles } from "@/lib/media-validation";
 import { AppShell } from "@/components/app-shell";
 import { GooglePlacesInput, type PlaceSelection } from "@/components/google-places-input";
 import { Button, Card, FormSelect, Input, ListItem, LoadingSpinner, Textarea } from "@/components/ui";
@@ -116,6 +117,7 @@ export default function InventoryAdminPage() {
     price_as_of_date: "",
     monthly_rent: "",
     security_deposit: "",
+    maintenance: "",
     stream_type: "sales",
     contact_id: "",
     description: "",
@@ -258,6 +260,13 @@ export default function InventoryAdminPage() {
       setMessage("Owner name and phone are required");
       return;
     }
+    if (listingFiles.length) {
+      const mediaErr = validateMediaFiles(listingFiles);
+      if (mediaErr) {
+        setMessage(mediaErr);
+        return;
+      }
+    }
 
     setLoading(true);
     try {
@@ -320,6 +329,7 @@ export default function InventoryAdminPage() {
         price_as_of_date: listingForm.price_as_of_date || undefined,
         monthly_rent: num(listingForm.monthly_rent),
         security_deposit: num(listingForm.security_deposit),
+        maintenance: num(listingForm.maintenance),
         price,
         stream_type: listingForm.stream_type,
         contact_id: contactId,
@@ -606,6 +616,7 @@ export default function InventoryAdminPage() {
               <>
                 <Input placeholder="Monthly rent (INR)" type="number" value={listingForm.monthly_rent} onChange={(e) => setListingForm({ ...listingForm, monthly_rent: e.target.value })} />
                 <Input placeholder="Security deposit (INR)" type="number" value={listingForm.security_deposit} onChange={(e) => setListingForm({ ...listingForm, security_deposit: e.target.value })} />
+                <Input placeholder="Maintenance / month (INR)" type="number" value={listingForm.maintenance} onChange={(e) => setListingForm({ ...listingForm, maintenance: e.target.value })} />
                 <Input placeholder="Car parking (INR)" type="number" value={listingForm.car_parking_price} onChange={(e) => setListingForm({ ...listingForm, car_parking_price: e.target.value })} />
               </>
             )}
@@ -614,7 +625,29 @@ export default function InventoryAdminPage() {
           <Textarea placeholder="Notes" value={listingForm.description} onChange={(e) => setListingForm({ ...listingForm, description: e.target.value })} />
           <label className="block">
             <span className="mb-1 block text-sm font-medium">Photos & videos</span>
-            <input type="file" multiple accept="image/*,video/*" onChange={(e) => setListingFiles(Array.from(e.target.files || []))} />
+            <p className="mb-2 text-xs text-slate-500">
+              Images up to 25 MB (JPG, PNG, WebP, HEIC). Videos up to 100 MB (MP4, MOV, WebM). Max 12 files.
+            </p>
+            <input
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov,.webm"
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                const err = validateMediaFiles(files);
+                if (err) {
+                  setMessage(err);
+                  setListingFiles([]);
+                } else {
+                  setMessage("");
+                  setListingFiles(files);
+                }
+                e.target.value = "";
+              }}
+            />
+            {listingFiles.length > 0 && (
+              <p className="mt-1 text-xs text-slate-500">{listingFiles.length} file(s) selected</p>
+            )}
           </label>
           {createdListingId && <p className="text-sm text-emerald-700">Last listing saved</p>}
           <Button className="w-full" onClick={saveListing} disabled={loading || !(listingForm.project_name || (listingForm.use_project_context && selectedProject)) || !listingForm.bhk}>

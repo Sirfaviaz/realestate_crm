@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronLeft, ChevronUp, Plus, Search, X } from "lucide-react";
-import { contactsApi, mediaUrl, requirementsApi, type AvailableNowResponse, type Contact, type LeadRequirement, type LocationAnchor } from "@/lib/api";
+import { contactsApi, listingsApi, mediaUrl, requirementsApi, type AvailableNowResponse, type Contact, type LeadRequirement, type LocationAnchor } from "@/lib/api";
 import {
   CONTACT_TYPES,
   LEAD_SCORE_OPTIONS,
@@ -17,6 +17,7 @@ import {
   type ContactRoleKey,
 } from "@/lib/contact-roles";
 import { BHK_OPTIONS } from "@/lib/inventory-presets";
+import { formatFileSize, mediaKind, validateMediaFiles } from "@/lib/media-validation";
 import { formatPrice } from "@/lib/utils";
 import { AppShell } from "@/components/app-shell";
 import { GooglePlacesInput } from "@/components/google-places-input";
@@ -53,6 +54,8 @@ export default function LeadsPage() {
     budget_min: "",
     budget_max: "",
     rent_budget: "",
+    security_deposit: "",
+    maintenance: "",
     move_in_date: "",
     urgency: "",
     lead_score: "",
@@ -70,6 +73,9 @@ export default function LeadsPage() {
   const [cityCenter, setCityCenter] = useState<{ lat: number; lng: number } | null>(null);
   /** Landlord: empty = all tenant types welcome. */
   const [preferredTenantTypes, setPreferredTenantTypes] = useState<string[]>([]);
+  const [mediaFiles, setMediaFiles] = useState<File[]>([]);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [savedReqId, setSavedReqId] = useState<string | null>(null);
   const [available, setAvailable] = useState<AvailableNowResponse | null>(null);
 
@@ -169,8 +175,30 @@ export default function LeadsPage() {
     }
   };
 
+  const onMediaPick = (files: FileList | null) => {
+    if (!files?.length) return;
+    const next = [...mediaFiles, ...Array.from(files)];
+    const err = validateMediaFiles(next);
+    setMediaError(err);
+    if (!err) setMediaFiles(next);
+  };
+
+  const removeMediaFile = (index: number) => {
+    const next = mediaFiles.filter((_, i) => i !== index);
+    setMediaFiles(next);
+    setMediaError(next.length ? validateMediaFiles(next) : null);
+  };
+
   const saveLead = async () => {
     if (!role) return;
+    setFormError(null);
+    if (isSupply && mediaFiles.length) {
+      const err = validateMediaFiles(mediaFiles);
+      if (err) {
+        setMediaError(err);
+        return;
+      }
+    }
     setLoading(true);
     try {
       const meta = getContactType(role);
@@ -203,6 +231,8 @@ export default function LeadsPage() {
           ...tenantPayload,
         });
       }
+      const deposit = reqForm.security_deposit ? Number(reqForm.security_deposit) : undefined;
+      const maintenance = reqForm.maintenance ? Number(reqForm.maintenance) : undefined;
       const req = await requirementsApi.create({
         contact_id: contactId,
         role,
@@ -218,6 +248,8 @@ export default function LeadsPage() {
         budget_min: reqForm.budget_min ? Number(reqForm.budget_min) : undefined,
         budget_max: reqForm.budget_max ? Number(reqForm.budget_max) : undefined,
         rent_budget: reqForm.rent_budget ? Number(reqForm.rent_budget) : undefined,
+        security_deposit: role === "landlord" ? deposit : undefined,
+        maintenance: role === "landlord" ? maintenance : undefined,
         move_in_date: reqForm.move_in_date || undefined,
         urgency: reqForm.urgency || undefined,
         lead_score: reqForm.lead_score || undefined,
@@ -229,10 +261,42 @@ export default function LeadsPage() {
               : null
             : undefined,
       });
+
+      if (role === "landlord" || role === "seller") {
+        const anchor = locationAnchors[0];
+        const area = anchor?.name || reqForm.city || "Property";
+        const propType = reqForm.property_types[0];
+        const title = [reqForm.bhk, propType, area].filter(Boolean).join(" · ") || `${personForm.name}'s property`;
+        const rent = reqForm.rent_budget ? Number(reqForm.rent_budget) : undefined;
+        const asking = reqForm.budget_max ? Number(reqForm.budget_max) : undefined;
+        const listing = await listingsApi.create({
+          contact_id: contactId,
+          stream_type: meta.stream,
+          title,
+          location_text: [area, reqForm.city].filter(Boolean).join(", "),
+          latitude: anchor?.lat,
+          longitude: anchor?.lng,
+          bhk: reqForm.bhk || undefined,
+          property_type: propType,
+          price: meta.stream === "rental" ? rent : asking,
+          monthly_rent: meta.stream === "rental" ? rent : undefined,
+          security_deposit: role === "landlord" ? deposit : undefined,
+          maintenance: role === "landlord" ? maintenance : undefined,
+          total_amount: meta.stream === "sales" ? asking : undefined,
+          description: reqForm.notes || undefined,
+          status: "available",
+        });
+        for (let i = 0; i < mediaFiles.length; i++) {
+          await listingsApi.uploadMedia(listing.id, mediaFiles[i], i);
+        }
+      }
+
       const avail = await requirementsApi.availableNow(req.id);
       setSavedReqId(req.id);
       setAvailable(avail);
       setCreateStep(3);
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : "Could not save lead");
     } finally {
       setLoading(false);
     }
@@ -250,6 +314,8 @@ export default function LeadsPage() {
       budget_min: "",
       budget_max: "",
       rent_budget: "",
+      security_deposit: "",
+      maintenance: "",
       move_in_date: "",
       urgency: "",
       lead_score: "",
@@ -266,6 +332,9 @@ export default function LeadsPage() {
     setLocationAnchors([]);
     setCityCenter(null);
     setPreferredTenantTypes([]);
+    setMediaFiles([]);
+    setMediaError(null);
+    setFormError(null);
     setSavedReqId(null);
     setAvailable(null);
   };
@@ -634,12 +703,26 @@ export default function LeadsPage() {
                 onChange={(e) => setReqForm({ ...reqForm, budget_min: "", budget_max: e.target.value })}
               />
             ) : (
-              <Input
-                placeholder="Asking rent / month"
-                type="number"
-                value={reqForm.rent_budget}
-                onChange={(e) => setReqForm({ ...reqForm, rent_budget: e.target.value })}
-              />
+              <div className="space-y-2">
+                <Input
+                  placeholder="Asking rent / month"
+                  type="number"
+                  value={reqForm.rent_budget}
+                  onChange={(e) => setReqForm({ ...reqForm, rent_budget: e.target.value })}
+                />
+                <Input
+                  placeholder="Security deposit"
+                  type="number"
+                  value={reqForm.security_deposit}
+                  onChange={(e) => setReqForm({ ...reqForm, security_deposit: e.target.value })}
+                />
+                <Input
+                  placeholder="Maintenance / month"
+                  type="number"
+                  value={reqForm.maintenance}
+                  onChange={(e) => setReqForm({ ...reqForm, maintenance: e.target.value })}
+                />
+              </div>
             )
           ) : meta.stream === "sales" ? (
             <div className="grid grid-cols-2 gap-2">
@@ -648,6 +731,49 @@ export default function LeadsPage() {
             </div>
           ) : (
             <Input placeholder="Rent budget / month" type="number" value={reqForm.rent_budget} onChange={(e) => setReqForm({ ...reqForm, rent_budget: e.target.value })} />
+          )}
+          {isSupply && (
+            <div>
+              <div className="mb-2 text-sm font-medium">Photos & videos</div>
+              <p className="mb-2 text-xs text-slate-500">
+                Images up to 25 MB (JPG, PNG, WebP, HEIC). Videos up to 100 MB (MP4, MOV, WebM). Max 12 files.
+              </p>
+              <input
+                type="file"
+                multiple
+                accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov,.webm"
+                className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-emerald-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white"
+                onChange={(e) => {
+                  onMediaPick(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              {mediaError && <p className="mt-2 text-sm text-red-600">{mediaError}</p>}
+              {mediaFiles.length > 0 && (
+                <ul className="mt-2 space-y-2">
+                  {mediaFiles.map((file, index) => (
+                    <li
+                      key={`${file.name}-${file.size}-${index}`}
+                      className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                    >
+                      <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-600">
+                        {mediaKind(file)}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-sm">{file.name}</span>
+                      <span className="shrink-0 text-xs text-slate-500">{formatFileSize(file.size)}</span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => removeMediaFile(index)}
+                        className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-red-600"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
           <select className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" value={reqForm.urgency} onChange={(e) => setReqForm({ ...reqForm, urgency: e.target.value })}>
             <option value="">Urgency</option>
@@ -666,7 +792,8 @@ export default function LeadsPage() {
             {LEAD_SCORE_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
           <Textarea placeholder="Notes" value={reqForm.notes} onChange={(e) => setReqForm({ ...reqForm, notes: e.target.value })} />
-          <Button className="w-full" disabled={loading} onClick={saveLead}>
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          <Button className="w-full" disabled={loading || !!mediaError} onClick={saveLead}>
             {loading
               ? "Saving..."
               : role === "landlord"

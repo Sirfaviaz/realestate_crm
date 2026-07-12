@@ -51,6 +51,7 @@ class Listing(Base):
     price_as_of_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     monthly_rent: Mapped[float | None] = mapped_column(Float, nullable=True)
     security_deposit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    maintenance: Mapped[float | None] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="available", index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))

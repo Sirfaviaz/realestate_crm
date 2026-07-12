@@ -183,6 +183,8 @@ export type LeadRequirement = {
   budget_min?: number | null;
   budget_max?: number | null;
   rent_budget?: number | null;
+  security_deposit?: number | null;
+  maintenance?: number | null;
   move_in_date?: string | null;
   urgency?: string | null;
   lead_score?: string | null;
@@ -274,6 +276,7 @@ export type Listing = {
   price_as_of_date?: string | null;
   monthly_rent?: number | null;
   security_deposit?: number | null;
+  maintenance?: number | null;
   description?: string | null;
   cover_url?: string | null;
   contact_name?: string | null;
