@@ -229,7 +229,19 @@ export default function RequirementDetailPage() {
       "Mark this as a closed deal? The renter/buyer and property will leave matching and Properties."
     );
     if (!ok) return;
-    await requirementsApi.closeMatch(requirementId, matchId);
+    const amountRaw = window.prompt("Commission amount (INR)? Leave blank if none.", "");
+    if (amountRaw === null) return;
+    const commission_amount = amountRaw.trim() ? Number(amountRaw) : undefined;
+    if (amountRaw.trim() && Number.isNaN(commission_amount as number)) {
+      window.alert("Enter a valid commission amount");
+      return;
+    }
+    const commission_received =
+      commission_amount != null ? window.confirm("Mark commission as received?") : false;
+    await requirementsApi.closeMatch(requirementId, matchId, {
+      commission_amount,
+      commission_received,
+    });
     await load();
   };
 

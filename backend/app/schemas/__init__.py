@@ -173,6 +173,8 @@ class DealCreate(BaseModel):
     stage: str = "new"
     requirement_summary: str | None = None
     follow_up_at: datetime | None = None
+    commission_amount: float | None = None
+    commission_received: bool = False
 
 
 class DealResponse(DealCreate):
@@ -482,3 +484,5 @@ class MatchStatusUpdate(BaseModel):
 
 class CloseMatchRequest(BaseModel):
     notes: str | None = None
+    commission_amount: float | None = None
+    commission_received: bool = False

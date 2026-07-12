@@ -342,56 +342,83 @@ async def inform_match(
             mirror.follow_up_at = follow_at
 
     contact = match.requirement.contact if match.requirement else None
-    # Follow up with the person we messaged (counterpart for supply leads).
-    follow_contact = contact
-    if (
-        match.requirement
-        and match.requirement.role in ("landlord", "seller")
-        and match.matched_requirement
-        and match.matched_requirement.contact
-    ):
-        follow_contact = match.matched_requirement.contact
-    if follow_contact:
-        follow_contact.follow_up_at = follow_at
-    info = _match_property_info(match)
-    sent_label = body.notes or info.get("title") or "property"
-    whom = follow_contact.name if follow_contact else "contact"
+    counterpart = (
+        match.matched_requirement.contact
+        if match.matched_requirement and match.matched_requirement.contact
+        else None
+    )
+    is_supply_lead = bool(match.requirement and match.requirement.role in ("landlord", "seller"))
+
+    # Person we actually messaged / should follow up with.
+    if is_supply_lead and counterpart:
+        messaged = counterpart
+        property_label = body.notes
+        if not property_label and match.listing:
+            property_label = match.listing.title
+        if not property_label and match.requirement:
+            locs = match.requirement.preferred_locations or []
+            property_label = (
+                f"{match.requirement.bhk or ''} {(match.requirement.property_types or ['property'])[0]}".strip()
+                or "your property"
+            )
+            if locs:
+                property_label = f"{property_label} in {locs[0]}".strip()
+        if not property_label:
+            property_label = "the property"
+        listing_ref = f" (/listings/{match.listing_id})" if match.listing_id else ""
+    else:
+        messaged = contact
+        info = _match_property_info(match)
+        property_label = body.notes or info.get("title") or "a property"
+        listing_ref = f" (/listings/{match.listing_id})" if match.listing_id else ""
+
+    follow_at_date = follow_at.date().isoformat()
     channel = "WhatsApp" if via == "whatsapp" else "a call"
-    # Agent-side (lead being worked) + person contacted (renter/buyer) both get a timeline entry.
-    if contact:
+
+    if messaged:
+        messaged.follow_up_at = follow_at
+        db.add(
+            Activity(
+                contact_id=messaged.id,
+                activity_type="match_informed",
+                content=f"We shared property details via {channel}: {property_label}{listing_ref}",
+                created_by_id=user.id,
+            )
+        )
+        db.add(
+            Activity(
+                contact_id=messaged.id,
+                activity_type="follow_up",
+                content=f"Follow-up scheduled for {follow_at_date} about: {property_label}",
+                created_by_id=user.id,
+            )
+        )
+
+    # Landlord/seller working the lead: note who we shared with (not "renter looking for…").
+    if is_supply_lead and contact and messaged and contact.id != messaged.id:
         db.add(
             Activity(
                 contact_id=contact.id,
                 activity_type="match_informed",
                 content=(
-                    f"We sent {channel} to {whom} about this property: {sent_label}. "
-                    f"Follow-up scheduled {follow_at.date().isoformat()}."
+                    f"Shared this property with {messaged.name} via {channel}. "
+                    f"Follow-up {follow_at_date}."
                 ),
                 created_by_id=user.id,
             )
         )
-    if follow_contact and (not contact or follow_contact.id != contact.id):
-        property_ref = sent_label
-        if match.listing_id:
-            property_ref = f"{info.get('title') or 'property'} (/listings/{match.listing_id})"
-        elif match.requirement and match.requirement.role in ("landlord", "seller"):
-            property_ref = sent_label
+    elif contact and messaged and contact.id == messaged.id:
+        pass  # already logged on messaged
+    elif contact and not messaged:
         db.add(
             Activity(
-                contact_id=follow_contact.id,
+                contact_id=contact.id,
                 activity_type="match_informed",
-                content=f"We sent a {channel} message about this property: {property_ref}",
+                content=f"Informed via {channel}: {property_label}",
                 created_by_id=user.id,
             )
         )
-        db.add(
-            Activity(
-                contact_id=follow_contact.id,
-                activity_type="follow_up",
-                content=f"Follow-up scheduled for {follow_at.date().isoformat()} about: {sent_label}",
-                created_by_id=user.id,
-            )
-        )
+
     await db.commit()
     await db.refresh(match)
     return _match_response(match)
@@ -416,7 +443,16 @@ async def close_match_deal(
     from app.services.deals_close import close_match_as_deal
 
     notes = body.notes if body else None
-    await close_match_as_deal(db, match, user_id=user.id, notes=notes)
+    commission_amount = body.commission_amount if body else None
+    commission_received = body.commission_received if body else False
+    await close_match_as_deal(
+        db,
+        match,
+        user_id=user.id,
+        notes=notes,
+        commission_amount=commission_amount,
+        commission_received=bool(commission_received),
+    )
     result = await db.execute(
         select(RequirementMatch).options(*_MATCH_LOAD).where(RequirementMatch.id == match_id)
     )

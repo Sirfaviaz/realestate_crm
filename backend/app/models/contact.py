@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -78,6 +78,8 @@ class Deal(Base):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True
     )
     requirement_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    commission_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    commission_received: Mapped[bool] = mapped_column(Boolean, default=False)
     follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

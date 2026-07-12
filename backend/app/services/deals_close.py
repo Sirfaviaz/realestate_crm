@@ -38,6 +38,8 @@ async def close_match_as_deal(
     *,
     user_id: UUID | None,
     notes: str | None = None,
+    commission_amount: float | None = None,
+    commission_received: bool = False,
 ) -> Deal:
     """Mark renter/buyer + property as done; hide from Properties and future matching."""
     req = match.requirement
@@ -128,6 +130,10 @@ async def close_match_as_deal(
     summary = f"Closed: {demand_name} ← {supply_label}"
     if notes:
         summary = f"{summary}. {notes}"
+    if commission_amount is not None:
+        summary = f"{summary}. Commission: {commission_amount:g}"
+        if commission_received:
+            summary = f"{summary} (received)"
 
     deal = Deal(
         stream_type=stream,
@@ -137,11 +143,22 @@ async def close_match_as_deal(
         requirement_id=demand.id if demand else (req.id if req else None),
         requirement_summary=summary,
         assigned_user_id=user_id,
+        commission_amount=commission_amount,
+        commission_received=commission_received,
     )
     db.add(deal)
 
     for cid, text in [
-        (demand.contact_id if demand else None, f"Deal closed — got home/property: {supply_label}"),
+        (
+            demand.contact_id if demand else None,
+            f"Deal done — moved into {supply_label}"
+            + (
+                f". Commission ₹{commission_amount:g}"
+                + (" received" if commission_received else " pending")
+                if commission_amount is not None
+                else ""
+            ),
+        ),
         (supply.contact_id if supply else None, f"Deal closed — {demand_name} took this property"),
     ]:
         if cid:
@@ -153,6 +170,9 @@ async def close_match_as_deal(
                     created_by_id=user_id,
                 )
             )
+
+    if demand and demand.contact and commission_received:
+        demand.contact.lead_score = demand.contact.lead_score or "hot"
 
     await db.commit()
     await db.refresh(deal)

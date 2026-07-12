@@ -645,10 +645,14 @@ export const requirementsApi = {
       method: "PATCH",
       body: JSON.stringify({ status, notes }),
     }),
-  closeMatch: (requirementId: string, matchId: string, notes?: string) =>
+  closeMatch: (
+    requirementId: string,
+    matchId: string,
+    data?: { notes?: string; commission_amount?: number; commission_received?: boolean }
+  ) =>
     api<RequirementMatch>(`/requirements/${requirementId}/matches/${matchId}/close`, {
       method: "POST",
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify(data || {}),
     }),
   pendingMatches: () => api<RequirementMatch[]>("/matches/pending"),
 };

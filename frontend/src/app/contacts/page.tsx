@@ -10,6 +10,7 @@ import {
   type Contact,
   type LeadRequirement,
   type Listing,
+  type RequirementMatch,
 } from "@/lib/api";
 import { formatPrice } from "@/lib/utils";
 import {
@@ -56,7 +57,9 @@ export default function ContactsPage() {
   const [listingsByContact, setListingsByContact] = useState<Record<string, Listing[]>>({});
   const [reqsByContact, setReqsByContact] = useState<Record<string, LeadRequirement[]>>({});
   const [activitiesByContact, setActivitiesByContact] = useState<Record<string, Activity[]>>({});
+  const [matchesByContact, setMatchesByContact] = useState<Record<string, RequirementMatch[]>>({});
   const [detailLoading, setDetailLoading] = useState(false);
+  const [contactsById, setContactsById] = useState<Record<string, Contact>>({});
 
   const load = () => {
     setLoading(true);
@@ -66,6 +69,9 @@ export default function ContactsPage() {
     ])
       .then(([contacts, reqs]) => {
         setContacts(contacts);
+        const map: Record<string, Contact> = {};
+        for (const c of contacts) map[c.id] = c;
+        setContactsById((prev) => ({ ...prev, ...map }));
         const counts: Record<string, number> = {};
         for (const r of reqs) {
           counts[r.contact_id] = (counts[r.contact_id] || 0) + 1;
@@ -112,6 +118,36 @@ export default function ContactsPage() {
     load();
   };
 
+  const refreshContactDetail = async (c: Contact) => {
+    const [acts, reqs] = await Promise.all([
+      contactsApi.activities(c.id),
+      requirementsApi.list({ contact_id: c.id }),
+    ]);
+    setActivitiesByContact((prev) => ({ ...prev, [c.id]: acts.slice(0, 15) }));
+    setReqsByContact((prev) => ({ ...prev, [c.id]: reqs }));
+    const isOwner = c.roles.some((r) => r === "seller" || r === "landlord");
+    if (isOwner) {
+      const rows = await listingsApi.list({ contact_id: c.id });
+      setListingsByContact((prev) => ({ ...prev, [c.id]: rows }));
+    }
+    const demandReqs = reqs.filter((r) => r.role === "renter" || r.role === "buyer");
+    if (demandReqs.length) {
+      const matchLists = await Promise.all(demandReqs.map((r) => requirementsApi.matches(r.id)));
+      setMatchesByContact((prev) => ({
+        ...prev,
+        [c.id]: matchLists.flat(),
+      }));
+    } else {
+      setMatchesByContact((prev) => ({ ...prev, [c.id]: [] }));
+    }
+    const latest = await contactsApi.list();
+    const fresh = latest.find((x) => x.id === c.id);
+    if (fresh) {
+      setContacts((prev) => prev.map((x) => (x.id === c.id ? fresh : x)));
+      setContactsById((prev) => ({ ...prev, [c.id]: fresh }));
+    }
+  };
+
   const toggleExpanded = async (c: Contact) => {
     if (expanded === c.id) {
       setExpanded(null);
@@ -120,17 +156,7 @@ export default function ContactsPage() {
     setExpanded(c.id);
     setDetailLoading(true);
     try {
-      const [acts, reqs] = await Promise.all([
-        contactsApi.activities(c.id),
-        requirementsApi.list({ contact_id: c.id }),
-      ]);
-      setActivitiesByContact((prev) => ({ ...prev, [c.id]: acts.slice(0, 10) }));
-      setReqsByContact((prev) => ({ ...prev, [c.id]: reqs }));
-      const isOwner = c.roles.some((r) => r === "seller" || r === "landlord");
-      if (isOwner) {
-        const rows = await listingsApi.list({ contact_id: c.id });
-        setListingsByContact((prev) => ({ ...prev, [c.id]: rows }));
-      }
+      await refreshContactDetail(c);
     } finally {
       setDetailLoading(false);
     }
@@ -242,10 +268,12 @@ export default function ContactsPage() {
                     <LoadingSpinner />
                   ) : (
                     <PersonDetailPanel
-                      contact={c}
+                      contact={contactsById[c.id] || c}
                       requirements={reqsByContact[c.id] || []}
                       listings={listingsByContact[c.id] || []}
                       activities={activitiesByContact[c.id] || []}
+                      matches={matchesByContact[c.id] || []}
+                      onRefresh={() => refreshContactDetail(contactsById[c.id] || c)}
                     />
                   )}
                 </div>
@@ -263,29 +291,60 @@ function PersonDetailPanel({
   requirements,
   listings,
   activities,
+  matches,
+  onRefresh,
 }: {
   contact: Contact;
   requirements: LeadRequirement[];
   listings: Listing[];
   activities: Activity[];
+  matches: RequirementMatch[];
+  onRefresh: () => Promise<void>;
 }) {
   const isSupply = contact.roles.some((r) => r === "landlord" || r === "seller");
   const isDemand = contact.roles.some((r) => r === "renter" || r === "buyer");
   const shownReqs = requirements.filter((r) => r.status !== "closed");
   const activeReqs = requirements.filter((r) => r.status === "active" || r.status === "matched");
-  const timeline = buildTimeline(contact, activities);
+  const demandAll = requirements.filter((r) => r.role === "renter" || r.role === "buyer");
+  const primaryDemand = demandAll.find((r) => r.status === "active" || r.status === "matched") || demandAll[0];
+  const timeline = buildTimeline(contact, activities, { isSupply });
 
   const reqByListingId = new Map(
     shownReqs.filter((r) => r.listing_id).map((r) => [r.listing_id as string, r])
   );
   const listingIds = new Set(listings.map((l) => l.id));
-  /** Supply reqs with no linked listing (or listing not loaded) — show once as lead. */
   const orphanSupplyReqs = shownReqs.filter(
     (r) => (r.role === "landlord" || r.role === "seller") && (!r.listing_id || !listingIds.has(r.listing_id))
   );
-  const demandReqs = shownReqs.filter((r) => r.role === "renter" || r.role === "buyer");
+  const demandSummaries = shownReqs.filter((r) => r.role === "renter" || r.role === "buyer");
   const hasSupplyRows = listings.length > 0 || orphanSupplyReqs.length > 0;
-  const hasDemandRows = demandReqs.length > 0;
+  const hasDemandRows = demandSummaries.length > 0 || matches.length > 0;
+  const [busy, setBusy] = useState(false);
+
+  const markCold = async (reason: "elsewhere" | "not_looking") => {
+    if (!primaryDemand) return;
+    const label =
+      reason === "elsewhere"
+        ? "Got a property elsewhere — marked cold"
+        : "Not looking to move now — marked cold";
+    if (!window.confirm(`${label}. Continue?`)) return;
+    setBusy(true);
+    try {
+      await requirementsApi.update(primaryDemand.id, {
+        status: reason === "elsewhere" ? "closed" : "paused",
+        notes: [primaryDemand.notes, label].filter(Boolean).join(" · "),
+      });
+      await contactsApi.update(contact.id, { lead_score: "cold" });
+      await contactsApi.addActivity({
+        contact_id: contact.id,
+        activity_type: "status_change",
+        content: label,
+      });
+      await onRefresh();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <>
@@ -311,12 +370,34 @@ function PersonDetailPanel({
                     stream={contact.stream_type}
                   />
                 ))}
-              {isSupply &&
-                orphanSupplyReqs.map((r) => <RequirementSummary key={r.id} req={r} />)}
-              {demandReqs.map((r) => (
+              {isSupply && orphanSupplyReqs.map((r) => <RequirementSummary key={r.id} req={r} />)}
+              {demandSummaries.map((r) => (
                 <RequirementSummary key={r.id} req={r} />
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {isDemand && (
+        <DemandPropertyInterest matches={matches} busy={busy} setBusy={setBusy} onRefresh={onRefresh} />
+      )}
+
+      {isDemand && primaryDemand && (primaryDemand.status === "active" || primaryDemand.status === "matched") && (
+        <div className="space-y-2">
+          <div className="text-sm font-semibold text-slate-800">Search status</div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} onClick={() => markCold("elsewhere")} className="rounded-xl border-2 border-slate-200 px-3 py-2 text-sm text-slate-700">
+              Got home elsewhere
+            </button>
+            <button type="button" disabled={busy} onClick={() => markCold("not_looking")} className="rounded-xl border-2 border-slate-200 px-3 py-2 text-sm text-slate-700">
+              Not looking now (cold)
+            </button>
+          </div>
+          {contact.lead_score && (
+            <p className="text-xs text-slate-500">
+              Lead score: <span className="capitalize font-medium">{contact.lead_score}</span>
+            </p>
           )}
         </div>
       )}
@@ -372,6 +453,180 @@ function PersonDetailPanel({
         )}
       </div>
     </>
+  );
+}
+
+function matchInterestBucket(status: string): "interested" | "not_interested" | "done" | "other" {
+  if (status === "rejected") return "not_interested";
+  if (status === "closed") return "done";
+  if (status === "new" || status === "follow_up") return "interested";
+  return "other";
+}
+
+function matchStatusLabel(status: string): string {
+  switch (status) {
+    case "new":
+      return "Shared";
+    case "follow_up":
+      return "Interested / follow-up";
+    case "rejected":
+      return "Not interested";
+    case "closed":
+      return "Deal done";
+    default:
+      return status;
+  }
+}
+
+function DemandPropertyInterest({
+  matches,
+  busy,
+  setBusy,
+  onRefresh,
+}: {
+  matches: RequirementMatch[];
+  busy: boolean;
+  setBusy: (v: boolean) => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const interested = matches.filter((m) => matchInterestBucket(m.status) === "interested");
+  const notInterested = matches.filter((m) => matchInterestBucket(m.status) === "not_interested");
+  const done = matches.filter((m) => matchInterestBucket(m.status) === "done");
+
+  const setMatchStatus = async (m: RequirementMatch, status: string) => {
+    setBusy(true);
+    try {
+      await requirementsApi.updateMatchStatus(m.requirement_id, m.id, status);
+      await onRefresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeDeal = async (m: RequirementMatch) => {
+    const amountRaw = window.prompt("Commission amount (INR)? Leave blank if none.", "");
+    if (amountRaw === null) return;
+    const commission_amount = amountRaw.trim() ? Number(amountRaw) : undefined;
+    if (amountRaw.trim() && Number.isNaN(commission_amount as number)) {
+      window.alert("Enter a valid number");
+      return;
+    }
+    const commission_received =
+      commission_amount != null ? window.confirm("Mark commission as received?") : false;
+    setBusy(true);
+    try {
+      await requirementsApi.closeMatch(m.requirement_id, m.id, {
+        commission_amount,
+        commission_received,
+        notes: "Deal done from People",
+      });
+      await onRefresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!matches.length) {
+    return (
+      <div>
+        <div className="mb-2 text-sm font-semibold text-slate-800">Properties shared</div>
+        <p className="text-sm text-slate-500">No properties shared with this person yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <MatchGroup
+        title="Interested / in discussion"
+        empty="None yet"
+        matches={interested}
+        busy={busy}
+        onNotInterested={(m) => setMatchStatus(m, "rejected")}
+        onInterested={(m) => setMatchStatus(m, "follow_up")}
+        onDealDone={closeDeal}
+      />
+      <MatchGroup
+        title="Not interested"
+        empty="None"
+        matches={notInterested}
+        busy={busy}
+        onInterested={(m) => setMatchStatus(m, "follow_up")}
+      />
+      {done.length > 0 && <MatchGroup title="Deal done" empty="" matches={done} busy={busy} />}
+    </div>
+  );
+}
+
+function MatchGroup({
+  title,
+  empty,
+  matches,
+  busy,
+  onInterested,
+  onNotInterested,
+  onDealDone,
+}: {
+  title: string;
+  empty: string;
+  matches: RequirementMatch[];
+  busy: boolean;
+  onInterested?: (m: RequirementMatch) => void;
+  onNotInterested?: (m: RequirementMatch) => void;
+  onDealDone?: (m: RequirementMatch) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-2 text-sm font-semibold text-slate-800">{title}</div>
+      {matches.length === 0 ? (
+        <p className="text-sm text-slate-500">{empty}</p>
+      ) : (
+        <div className="space-y-2">
+          {matches.map((m) => {
+            const price = m.price != null ? formatPrice(m.price, "rental") : null;
+            return (
+              <div key={m.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                <div className="font-medium text-slate-900">
+                  {m.listing_id ? (
+                    <Link href={`/listings/${m.listing_id}`} className="text-emerald-800 underline">
+                      {m.title || "Property"}
+                    </Link>
+                  ) : (
+                    m.title || "Property"
+                  )}
+                </div>
+                {m.location && <div>{m.location}</div>}
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {m.bhk && <Badge>{m.bhk}</Badge>}
+                  {m.property_type && <Badge>{m.property_type}</Badge>}
+                  <Badge className="bg-slate-100 text-slate-700">{matchStatusLabel(m.status)}</Badge>
+                  {price && <Badge>{price}</Badge>}
+                </div>
+                {(onInterested || onNotInterested || onDealDone) && m.status !== "closed" && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {onInterested && m.status !== "follow_up" && (
+                      <button type="button" disabled={busy} onClick={() => onInterested(m)} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white">
+                        Interested
+                      </button>
+                    )}
+                    {onNotInterested && m.status !== "rejected" && (
+                      <button type="button" disabled={busy} onClick={() => onNotInterested(m)} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700">
+                        Not interested
+                      </button>
+                    )}
+                    {onDealDone && (
+                      <button type="button" disabled={busy} onClick={() => onDealDone(m)} className="rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-white">
+                        Deal done + commission
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -473,13 +728,22 @@ function RequirementSummary({ req }: { req: LeadRequirement }) {
   );
 }
 
-function buildTimeline(contact: Contact, activities: Activity[]) {
-  const items: { id: string; text: string; when: string; at: number }[] = activities.map((a) => ({
-    id: a.id,
-    text: humanizeActivity(a),
-    when: new Date(a.created_at).toLocaleString(),
-    at: new Date(a.created_at).getTime(),
-  }));
+function buildTimeline(
+  contact: Contact,
+  activities: Activity[],
+  opts?: { isSupply?: boolean }
+) {
+  const items: { id: string; text: string; when: string; at: number }[] = [];
+  for (const a of activities) {
+    const text = humanizeActivity(a, opts);
+    if (!text) continue;
+    items.push({
+      id: a.id,
+      text,
+      when: new Date(a.created_at).toLocaleString(),
+      at: new Date(a.created_at).getTime(),
+    });
+  }
 
   if (contact.site_visit_at) {
     const at = new Date(contact.site_visit_at).getTime();
@@ -503,12 +767,28 @@ function buildTimeline(contact: Contact, activities: Activity[]) {
   return items.sort((a, b) => b.at - a.at);
 }
 
-function humanizeActivity(a: Activity): string {
+function humanizeActivity(a: Activity, opts?: { isSupply?: boolean }): string {
   const raw = a.content?.trim() || "";
   switch (a.activity_type) {
-    case "match_informed":
-      if (/whatsapp/i.test(raw)) return raw;
+    case "match_informed": {
+      // Old bug: landlord timeline stored "Informed via whatsapp: {renter} looking for…"
+      const legacy = raw.match(/^Informed via\s+(\w+)\s*:\s*(.+)$/i);
+      if (legacy) {
+        const via = /whatsapp/i.test(legacy[1]) ? "WhatsApp" : legacy[1];
+        const rest = legacy[2];
+        if (/looking for/i.test(rest)) {
+          if (opts?.isSupply) {
+            const name = rest.replace(/\s*looking for.*$/i, "").trim();
+            return `Shared this property with ${name} via ${via}`;
+          }
+          return `Received property details via ${via}`;
+        }
+        return opts?.isSupply
+          ? `Shared property via ${via}: ${rest}`
+          : `Received property details via ${via}: ${rest}`;
+      }
       return raw || "We sent a WhatsApp / call about a property";
+    }
     case "match_rejected":
       return raw.startsWith("Not interested") ? raw : `Not interested in ${raw || "a property"}`;
     case "follow_up":
@@ -522,6 +802,8 @@ function humanizeActivity(a: Activity): string {
       return raw || "WhatsApp message";
     case "note":
       return raw || "Note";
+    case "status_change":
+      return raw || "Status updated";
     default:
       return raw || a.activity_type.replace(/_/g, " ");
   }

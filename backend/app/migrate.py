@@ -60,6 +60,8 @@ MIGRATIONS = [
     "ALTER TABLE lead_requirements ADD COLUMN IF NOT EXISTS listing_id UUID REFERENCES listings(id)",
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS listing_id UUID REFERENCES listings(id)",
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS requirement_id UUID REFERENCES lead_requirements(id)",
+    "ALTER TABLE deals ADD COLUMN IF NOT EXISTS commission_amount DOUBLE PRECISION",
+    "ALTER TABLE deals ADD COLUMN IF NOT EXISTS commission_received BOOLEAN DEFAULT FALSE",
 ]
 
 
