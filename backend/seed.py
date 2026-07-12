@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal, Base, engine
+import app.models  # noqa: F401 — register all mappers (incl. BuilderSubmission)
 from app.models.contact import Contact
 from app.models.inventory import Location, Project, UnitOption, UnitSpec
 from app.models.listing import Listing

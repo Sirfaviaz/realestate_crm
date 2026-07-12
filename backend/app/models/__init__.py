@@ -4,6 +4,7 @@ from app.models.contact import Contact, Deal, Activity, Favorite
 from app.models.listing import Listing, ListingMedia
 from app.models.requirement import LeadRequirement, RequirementMatch
 from app.models.whatsapp import WhatsAppMessage
+from app.models.builder import Builder, BuilderProject, BuilderSubmission
 
 __all__ = [
     "User",
@@ -20,4 +21,7 @@ __all__ = [
     "LeadRequirement",
     "RequirementMatch",
     "WhatsAppMessage",
+    "Builder",
+    "BuilderProject",
+    "BuilderSubmission",
 ]
