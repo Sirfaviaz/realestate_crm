@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     google_maps_api_key: str = ""
     media_root: str = "data/media"
     max_image_mb: int = 25
-    max_video_mb: int = 100
+    max_video_mb: int = 50
     whatsapp_token: str = ""
     whatsapp_phone_id: str = ""
     whatsapp_verify_token: str = ""

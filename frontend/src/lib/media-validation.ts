@@ -1,6 +1,6 @@
 /** Matches backend `app.services.storage` limits. */
 export const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-export const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 export const MAX_MEDIA_FILES = 12;
 
 const IMAGE_TYPES = new Set([
@@ -39,7 +39,7 @@ export function validateMediaFiles(files: File[]): string | null {
       return `"${file.name}" is not a supported image or video. Use JPG, PNG, WebP, HEIC, MP4, MOV, or WebM.`;
     }
     const max = kind === "image" ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
-    const label = kind === "image" ? "25 MB" : "100 MB";
+    const label = kind === "image" ? "25 MB" : "50 MB";
     if (file.size > max) {
       return `"${file.name}" is too large. Max ${label} for ${kind}s.`;
     }

@@ -22,6 +22,7 @@ import {
   STREAM_OPTIONS,
 } from "@/lib/inventory-presets";
 import { validateMediaFiles } from "@/lib/media-validation";
+import { digitsOnly, isValidPhone, phoneError } from "@/lib/phone";
 import { AppShell } from "@/components/app-shell";
 import { GooglePlacesInput, type PlaceSelection } from "@/components/google-places-input";
 import { Button, Card, FormSelect, Input, ListItem, LoadingSpinner, Textarea } from "@/components/ui";
@@ -259,6 +260,17 @@ export default function InventoryAdminPage() {
     if (contactMode === "new" && (!ownerForm.name.trim() || !ownerForm.phone.trim())) {
       setMessage("Owner name and phone are required");
       return;
+    }
+    if (contactMode === "new") {
+      const phoneErr =
+        phoneError(ownerForm.phone) ||
+        (ownerForm.whatsapp
+          ? phoneError(ownerForm.whatsapp, { required: false, label: "WhatsApp" })
+          : null);
+      if (phoneErr) {
+        setMessage(phoneErr);
+        return;
+      }
     }
     if (listingFiles.length) {
       const mediaErr = validateMediaFiles(listingFiles);
@@ -509,12 +521,29 @@ export default function InventoryAdminPage() {
             ) : (
               <div className="space-y-2">
                 <Input placeholder="Name *" value={ownerForm.name} onChange={(e) => setOwnerForm({ ...ownerForm, name: e.target.value })} />
-                <Input placeholder="Phone *" value={ownerForm.phone} onChange={(e) => setOwnerForm({ ...ownerForm, phone: e.target.value })} />
+                <div>
+                  <Input
+                    placeholder="Phone * (10 digits)"
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={ownerForm.phone}
+                    onChange={(e) => setOwnerForm({ ...ownerForm, phone: digitsOnly(e.target.value) })}
+                  />
+                  {ownerForm.phone && phoneError(ownerForm.phone) && (
+                    <p className="mt-1 text-sm text-red-600">{phoneError(ownerForm.phone)}</p>
+                  )}
+                </div>
                 <div className="space-y-2">
-                  <Input placeholder="WhatsApp" value={ownerForm.whatsapp} onChange={(e) => setOwnerForm({ ...ownerForm, whatsapp: e.target.value })} />
+                  <Input
+                    placeholder="WhatsApp (10 digits)"
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={ownerForm.whatsapp}
+                    onChange={(e) => setOwnerForm({ ...ownerForm, whatsapp: digitsOnly(e.target.value) })}
+                  />
                   <button
                     type="button"
-                    disabled={!ownerForm.phone.trim()}
+                    disabled={!isValidPhone(ownerForm.phone)}
                     onClick={() => setOwnerForm((f) => ({ ...f, whatsapp: f.phone }))}
                     className="text-sm font-medium text-emerald-700 disabled:text-slate-400"
                   >
@@ -626,7 +655,7 @@ export default function InventoryAdminPage() {
           <label className="block">
             <span className="mb-1 block text-sm font-medium">Photos & videos</span>
             <p className="mb-2 text-xs text-slate-500">
-              Images up to 25 MB (JPG, PNG, WebP, HEIC). Videos up to 100 MB (MP4, MOV, WebM). Max 12 files.
+              Images up to 25 MB (JPG, PNG, WebP, HEIC). Videos up to 50 MB (MP4, MOV, WebM). Max 12 files.
             </p>
             <input
               type="file"

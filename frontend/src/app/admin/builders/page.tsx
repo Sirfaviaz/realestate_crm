@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { buildersApi, inventoryApi, type Builder, type Project } from "@/lib/api";
+import { digitsOnly, isValidPhone, phoneError } from "@/lib/phone";
 import { AppShell } from "@/components/app-shell";
 import { Button, Card, Input, ListItem } from "@/components/ui";
 
@@ -24,6 +25,13 @@ export default function BuildersAdminPage() {
   };
 
   const save = async () => {
+    if (phone) {
+      const err = phoneError(phone, { required: false });
+      if (err) {
+        setMessage(err);
+        return;
+      }
+    }
     try {
       const b = await buildersApi.create({ name, email, phone, project_ids: selectedProjects });
       setBuilders((prev) => [b, ...prev]);
@@ -45,7 +53,18 @@ export default function BuildersAdminPage() {
       <Card className="mb-6 space-y-3">
         <Input placeholder="Builder name" value={name} onChange={(e) => setName(e.target.value)} />
         <Input placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <Input placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        <div>
+          <Input
+            placeholder="Phone (10 digits)"
+            inputMode="numeric"
+            maxLength={10}
+            value={phone}
+            onChange={(e) => setPhone(digitsOnly(e.target.value))}
+          />
+          {phone && phoneError(phone, { required: false }) && (
+            <p className="mt-1 text-sm text-red-600">{phoneError(phone, { required: false })}</p>
+          )}
+        </div>
         <div>
           <div className="mb-2 text-sm font-medium">Linked projects</div>
           <div className="max-h-40 space-y-1 overflow-y-auto">
@@ -57,7 +76,9 @@ export default function BuildersAdminPage() {
             ))}
           </div>
         </div>
-        <Button className="w-full" onClick={save}>Add Builder</Button>
+        <Button className="w-full" disabled={!!phone && !isValidPhone(phone)} onClick={save}>
+          Add Builder
+        </Button>
       </Card>
 
       <div className="space-y-2">

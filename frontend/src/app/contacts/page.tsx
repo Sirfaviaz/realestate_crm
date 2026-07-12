@@ -5,6 +5,7 @@ import Link from "next/link";
 import { contactsApi, listingsApi, requirementsApi, type Contact, type Listing } from "@/lib/api";
 import { formatPrice } from "@/lib/utils";
 import { CONTACT_TYPES, LEAD_SCORE_OPTIONS, URGENCY_OPTIONS, roleLabel } from "@/lib/contact-roles";
+import { digitsOnly, isValidPhone, phoneError } from "@/lib/phone";
 import { whatsappLink } from "@/lib/whatsapp";
 import { AppShell } from "@/components/app-shell";
 import { Badge, Button, Card, Input, ListItem, LoadingSpinner, SearchBar, Textarea } from "@/components/ui";
@@ -35,6 +36,7 @@ export default function ContactsPage() {
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [form, setForm] = useState(formDefaults);
+  const [formError, setFormError] = useState<string | null>(null);
   const [reqCounts, setReqCounts] = useState<Record<string, number>>({});
   const [listings, setListings] = useState<Record<string, Listing[]>>({});
 
@@ -61,6 +63,14 @@ export default function ContactsPage() {
   }, [query, filter]);
 
   const save = async () => {
+    const err =
+      phoneError(form.phone) ||
+      (form.whatsapp ? phoneError(form.whatsapp, { required: false, label: "WhatsApp" }) : null);
+    if (err) {
+      setFormError(err);
+      return;
+    }
+    setFormError(null);
     const meta = CONTACT_TYPES.find((r) => r.role === form.role);
     await contactsApi.create({
       name: form.name,
@@ -80,6 +90,7 @@ export default function ContactsPage() {
       notes: form.notes || undefined,
     });
     setShowForm(false);
+    setForm(formDefaults);
     load();
   };
 
@@ -116,12 +127,34 @@ export default function ContactsPage() {
       {showForm && (
         <Card className="mb-4 space-y-3">
           <Input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <div>
+            <Input
+              placeholder="Phone * (10 digits)"
+              inputMode="numeric"
+              maxLength={10}
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: digitsOnly(e.target.value) })}
+            />
+            {form.phone && phoneError(form.phone) && (
+              <p className="mt-1 text-sm text-red-600">{phoneError(form.phone)}</p>
+            )}
+          </div>
           <div className="space-y-2">
-            <Input placeholder="WhatsApp" value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
+            <Input
+              placeholder="WhatsApp (10 digits)"
+              inputMode="numeric"
+              maxLength={10}
+              value={form.whatsapp}
+              onChange={(e) => setForm({ ...form, whatsapp: digitsOnly(e.target.value) })}
+            />
+            {form.whatsapp && phoneError(form.whatsapp, { required: false, label: "WhatsApp" }) && (
+              <p className="text-sm text-red-600">
+                {phoneError(form.whatsapp, { required: false, label: "WhatsApp" })}
+              </p>
+            )}
             <button
               type="button"
-              disabled={!form.phone.trim()}
+              disabled={!isValidPhone(form.phone)}
               onClick={() => setForm((f) => ({ ...f, whatsapp: f.phone }))}
               className="text-sm font-medium text-emerald-700 disabled:text-slate-400"
             >
@@ -142,7 +175,18 @@ export default function ContactsPage() {
           </select>
           <LeadFields form={form} setForm={setForm} stream={form.stream_type} />
           <Textarea placeholder="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          <Button className="w-full" onClick={save}>Save</Button>
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          <Button
+            className="w-full"
+            disabled={
+              !form.name.trim() ||
+              !isValidPhone(form.phone) ||
+              (!!form.whatsapp && !isValidPhone(form.whatsapp))
+            }
+            onClick={save}
+          >
+            Save
+          </Button>
         </Card>
       )}
       {loading ? <LoadingSpinner /> : (

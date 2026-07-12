@@ -18,6 +18,7 @@ import {
 } from "@/lib/contact-roles";
 import { BHK_OPTIONS } from "@/lib/inventory-presets";
 import { formatFileSize, mediaKind, validateMediaFiles } from "@/lib/media-validation";
+import { digitsOnly, isValidPhone, normalizePhone, phoneError } from "@/lib/phone";
 import { formatPrice } from "@/lib/utils";
 import { AppShell } from "@/components/app-shell";
 import { GooglePlacesInput } from "@/components/google-places-input";
@@ -221,6 +222,15 @@ export default function LeadsPage() {
   const saveLead = async () => {
     if (!role) return;
     setFormError(null);
+    const phoneErr =
+      phoneError(personForm.phone) ||
+      (personForm.whatsapp
+        ? phoneError(personForm.whatsapp, { required: false, label: "WhatsApp" })
+        : null);
+    if (phoneErr) {
+      setFormError(phoneErr);
+      return;
+    }
     const supply = role === "landlord" || role === "seller";
     if (supply) {
       const err = validateSupplyDetails();
@@ -464,16 +474,42 @@ export default function LeadsPage() {
         <Card className="space-y-3">
           <p className="text-sm text-slate-600">Enter person details or pick an existing contact.</p>
           <Input placeholder="Name *" value={personForm.name} onChange={(e) => setPersonForm({ ...personForm, name: e.target.value, existingId: "" })} />
-          <Input placeholder="Phone *" value={personForm.phone} onChange={(e) => setPersonForm({ ...personForm, phone: e.target.value, existingId: "" })} />
+          <div>
+            <Input
+              placeholder="Phone * (10 digits)"
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={10}
+              value={personForm.phone}
+              onChange={(e) =>
+                setPersonForm({
+                  ...personForm,
+                  phone: digitsOnly(e.target.value),
+                  existingId: "",
+                })
+              }
+            />
+            {personForm.phone && phoneError(personForm.phone) && (
+              <p className="mt-1 text-sm text-red-600">{phoneError(personForm.phone)}</p>
+            )}
+          </div>
           <div className="space-y-2">
             <Input
-              placeholder="WhatsApp (optional)"
+              placeholder="WhatsApp (10 digits, optional)"
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={10}
               value={personForm.whatsapp}
-              onChange={(e) => setPersonForm({ ...personForm, whatsapp: e.target.value })}
+              onChange={(e) => setPersonForm({ ...personForm, whatsapp: digitsOnly(e.target.value) })}
             />
+            {personForm.whatsapp && phoneError(personForm.whatsapp, { required: false, label: "WhatsApp" }) && (
+              <p className="text-sm text-red-600">
+                {phoneError(personForm.whatsapp, { required: false, label: "WhatsApp" })}
+              </p>
+            )}
             <button
               type="button"
-              disabled={!personForm.phone.trim()}
+              disabled={!isValidPhone(personForm.phone)}
               onClick={() => setPersonForm((f) => ({ ...f, whatsapp: f.phone }))}
               className="text-sm font-medium text-emerald-700 disabled:text-slate-400"
             >
@@ -488,7 +524,14 @@ export default function LeadsPage() {
                   key={c.id}
                   title={c.name}
                   subtitle={c.phone}
-                  onClick={() => setPersonForm({ name: c.name, phone: c.phone, whatsapp: c.whatsapp || "", existingId: c.id })}
+                  onClick={() =>
+                    setPersonForm({
+                      name: c.name,
+                      phone: normalizePhone(c.phone || ""),
+                      whatsapp: c.whatsapp ? normalizePhone(c.whatsapp) : "",
+                      existingId: c.id,
+                    })
+                  }
                   active={personForm.existingId === c.id}
                 />
               ))}
@@ -496,11 +539,28 @@ export default function LeadsPage() {
           )}
           <Button
             className="w-full"
-            disabled={!personForm.name || !personForm.phone}
-            onClick={() => setCreateStep(1)}
+            disabled={
+              !personForm.name.trim() ||
+              !isValidPhone(personForm.phone) ||
+              (!!personForm.whatsapp && !isValidPhone(personForm.whatsapp))
+            }
+            onClick={() => {
+              const err =
+                phoneError(personForm.phone) ||
+                (personForm.whatsapp
+                  ? phoneError(personForm.whatsapp, { required: false, label: "WhatsApp" })
+                  : null);
+              if (err) {
+                setFormError(err);
+                return;
+              }
+              setFormError(null);
+              setCreateStep(1);
+            }}
           >
             Next
           </Button>
+          {formError && createStep === 0 && <p className="text-sm text-red-600">{formError}</p>}
         </Card>
       )}
 
@@ -773,7 +833,7 @@ export default function LeadsPage() {
             <div>
               <div className="mb-2 text-sm font-medium">Photos & videos *</div>
               <p className="mb-2 text-xs text-slate-500">
-                At least one photo required. Images up to 25 MB (JPG, PNG, WebP, HEIC). Videos up to 100 MB (MP4, MOV, WebM). Max 12 files.
+                At least one photo required. Images up to 25 MB (JPG, PNG, WebP, HEIC). Videos up to 50 MB (MP4, MOV, WebM). Max 12 files.
               </p>
               <input
                 type="file"
