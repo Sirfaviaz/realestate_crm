@@ -3,10 +3,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Plus } from "lucide-react";
 import { listingsApi, mediaUrl, type Listing } from "@/lib/api";
 import { formatPrice, formatSqft } from "@/lib/utils";
 import { whatsappLink } from "@/lib/whatsapp";
+import {
+  LISTING_STATUS_OPTIONS,
+  StatusPills,
+  listingStatusLabel,
+} from "@/components/status-pills";
 import { AppShell } from "@/components/app-shell";
 import { Badge, Card, LoadingSpinner } from "@/components/ui";
 
@@ -14,12 +19,28 @@ export default function ListingDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [listing, setListing] = useState<Listing | null>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [mediaIndex, setMediaIndex] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
     listingsApi.get(id).then(setListing).finally(() => setLoading(false));
   }, [id]);
+
+  const setStatus = async (status: string) => {
+    if (!listing || listing.status === status) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await listingsApi.update(listing.id, { status });
+      setListing(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update status");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -39,6 +60,13 @@ export default function ListingDetailPage() {
 
   const media = listing.media || [];
   const current = media[mediaIndex];
+  const isTerminal = listing.status === "sold" || listing.status === "rented";
+  const statusOptions = isTerminal
+    ? [
+        ...LISTING_STATUS_OPTIONS,
+        { value: listing.status, label: listingStatusLabel(listing.status) },
+      ]
+    : LISTING_STATUS_OPTIONS;
 
   return (
     <AppShell>
@@ -87,8 +115,28 @@ export default function ListingDetailPage() {
       <div className="mb-4 flex gap-2">
         {listing.bhk && <Badge>{listing.bhk}</Badge>}
         {listing.sqft && <Badge>{formatSqft(listing.sqft)}</Badge>}
-        <Badge className="capitalize">{listing.status}</Badge>
+        <Badge className="capitalize">{listing.stream_type === "sales" ? "Sale" : "Rent"}</Badge>
       </div>
+
+      <Card className="mb-4 space-y-2">
+        <div className="text-sm font-semibold text-slate-800">Status</div>
+        <p className="text-xs text-slate-500">
+          Unavailable and on-hold properties leave matching and the Available list.
+        </p>
+        <StatusPills
+          value={listing.status}
+          options={statusOptions}
+          onChange={setStatus}
+          disabled={saving || isTerminal}
+        />
+        {isTerminal && (
+          <p className="text-xs text-slate-500">
+            Marked {listingStatusLabel(listing.status)} from a closed deal.
+          </p>
+        )}
+        {error && <p className="text-sm text-red-600">{error}</p>}
+      </Card>
+
       {listing.stream_type === "rental" && (
         <div className="mb-4 space-y-1 text-sm text-slate-600">
           {listing.monthly_rent != null && <div>Rent: {formatPrice(listing.monthly_rent, "rental")}</div>}
@@ -97,6 +145,16 @@ export default function ListingDetailPage() {
         </div>
       )}
       {listing.description && <p className="mb-4 text-sm text-slate-600">{listing.description}</p>}
+
+      {listing.contact_id && (
+        <Link
+          href={`/listings/new?contact_id=${listing.contact_id}&stream=${listing.stream_type}`}
+          className="mb-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-slate-200 font-medium text-slate-800"
+        >
+          <Plus className="h-4 w-4" />
+          Add another property for {listing.contact_name || "this owner"}
+        </Link>
+      )}
 
       {listing.contact_whatsapp && (
         <a

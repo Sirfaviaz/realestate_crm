@@ -19,6 +19,7 @@ from app.schemas import (
     InformMatchRequest,
     LeadRequirementCreate,
     LeadRequirementResponse,
+    LeadRequirementUpdate,
     MatchFollowUpRequest,
     MatchStatusUpdate,
     RequirementMatchResponse,
@@ -213,7 +214,7 @@ async def get_requirement(
 @router.patch("/{requirement_id}", response_model=LeadRequirementResponse)
 async def update_requirement(
     requirement_id: UUID,
-    body: LeadRequirementCreate,
+    body: LeadRequirementUpdate,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(UserRole.ADMIN, UserRole.USER)),
 ):
@@ -225,12 +226,38 @@ async def update_requirement(
     req = result.scalar_one_or_none()
     if not req:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Requirement not found")
-    for key, value in body.model_dump(exclude={"contact_id"}).items():
+
+    data = body.model_dump(exclude_unset=True)
+    new_status = data.get("status")
+    if new_status is not None and new_status not in {"active", "matched", "paused", "closed"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid status: {new_status}")
+
+    for key, value in data.items():
         setattr(req, key, value)
+
+    # Keep linked listing in sync when pausing / closing / reactivating supply leads
+    if new_status is not None and req.listing_id:
+        listing = (
+            await db.execute(select(Listing).where(Listing.id == req.listing_id))
+        ).scalar_one_or_none()
+        if listing and listing.status not in ("sold", "rented"):
+            if new_status == "paused" and listing.status == "available":
+                listing.status = "unavailable"
+            elif new_status == "closed" and listing.status == "available":
+                listing.status = "unavailable"
+            elif new_status in ("active", "matched") and listing.status in ("unavailable", "hold"):
+                listing.status = "available"
+
     await db.commit()
-    await match_requirement(db, req.id)
+    if req.status in ("active", "matched"):
+        await match_requirement(db, req.id)
     await db.refresh(req)
-    return _req_response(req)
+    result = await db.execute(
+        select(LeadRequirement)
+        .options(selectinload(LeadRequirement.contact), selectinload(LeadRequirement.matches))
+        .where(LeadRequirement.id == requirement_id)
+    )
+    return _req_response(result.scalar_one())
 
 
 @router.post("/{requirement_id}/find-matches")

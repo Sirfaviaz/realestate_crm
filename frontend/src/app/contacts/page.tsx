@@ -271,7 +271,8 @@ function PersonDetailPanel({
 }) {
   const isSupply = contact.roles.some((r) => r === "landlord" || r === "seller");
   const isDemand = contact.roles.some((r) => r === "renter" || r === "buyer");
-  const activeReqs = requirements.filter((r) => r.status === "active");
+  const shownReqs = requirements.filter((r) => r.status !== "closed");
+  const activeReqs = requirements.filter((r) => r.status === "active" || r.status === "matched");
   const timeline = buildTimeline(contact, activities);
 
   return (
@@ -281,15 +282,15 @@ function PersonDetailPanel({
           <div className="mb-2 text-sm font-semibold text-slate-800">
             {isSupply ? "Property details" : "Looking for"}
           </div>
-          {activeReqs.length === 0 && listings.length === 0 ? (
+          {shownReqs.length === 0 && listings.length === 0 ? (
             <p className="text-sm text-slate-500">
               {isSupply
-                ? "No property details yet — add via Leads (landlord/seller) or Properties."
+                ? "No property details yet — tap Add property below."
                 : "No active search yet — create a lead for this person."}
             </p>
           ) : (
             <div className="space-y-2">
-              {activeReqs.map((r) => (
+              {shownReqs.map((r) => (
                 <RequirementSummary key={r.id} req={r} />
               ))}
               {isSupply && listings.map((l) => (
@@ -333,6 +334,14 @@ function PersonDetailPanel({
         >
           WhatsApp
         </a>
+        {isSupply && (
+          <Link
+            href={`/listings/new?contact_id=${contact.id}&stream=${contact.stream_type}`}
+            className="inline-flex rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white"
+          >
+            Add property
+          </Link>
+        )}
         {activeReqs[0] && (
           <Link
             href={`/leads/${activeReqs[0].id}`}
@@ -399,6 +408,9 @@ function ListingSummary({ listing, stream }: { listing: Listing; stream: string 
       <div className="mt-1 flex flex-wrap gap-1">
         {listing.bhk && <Badge>{listing.bhk}</Badge>}
         {listing.property_type && <Badge>{listing.property_type}</Badge>}
+        {listing.status !== "available" && (
+          <Badge className="capitalize bg-amber-100 text-amber-900">{listing.status}</Badge>
+        )}
       </div>
       {(listing.monthly_rent != null || listing.price != null) && (
         <div className="mt-1">{formatPrice(listing.monthly_rent ?? listing.price, stream)}</div>

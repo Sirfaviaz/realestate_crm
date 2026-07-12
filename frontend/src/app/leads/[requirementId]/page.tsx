@@ -17,6 +17,7 @@ import {
 import { PROPERTY_TYPES, TENANT_TYPES, roleLabel } from "@/lib/contact-roles";
 import { formatPrice } from "@/lib/utils";
 import { shareViaWhatsApp, tenantTypeLabel, whatsappLink, whatsappMessage } from "@/lib/whatsapp";
+import { LEAD_STATUS_OPTIONS, StatusPills } from "@/components/status-pills";
 import { AppShell } from "@/components/app-shell";
 import { Badge, Button, Card, EmptyState, LoadingSpinner } from "@/components/ui";
 
@@ -28,6 +29,7 @@ export default function RequirementDetailPage() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [sharing, setSharing] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
 
   const load = async (opts?: { findMatches?: boolean }) => {
     if (!requirementId) return;
@@ -75,7 +77,8 @@ export default function RequirementDetailPage() {
     }
   };
 
-  const propertyListing = listings[0] || null;
+  const propertyListing =
+    (req?.listing_id && listings.find((l) => l.id === req.listing_id)) || listings[0] || null;
   const propertyImages: string[] = (propertyListing?.media || [])
     .filter((m) => m.media_type === "image")
     .map((m) => mediaUrl(m.url) || "")
@@ -230,6 +233,20 @@ export default function RequirementDetailPage() {
     await load();
   };
 
+  const setLeadStatus = async (status: string) => {
+    if (!requirementId || !req || req.status === status) return;
+    setStatusSaving(true);
+    try {
+      const updated = await requirementsApi.update(requirementId, { status });
+      setReq(updated);
+      if (updated.contact_id && (updated.role === "landlord" || updated.role === "seller")) {
+        setListings(await listingsApi.list({ contact_id: updated.contact_id }));
+      }
+    } finally {
+      setStatusSaving(false);
+    }
+  };
+
   const hasTenantProfile =
     req &&
     (req.tenant_type ||
@@ -259,9 +276,30 @@ export default function RequirementDetailPage() {
         <div className="mb-1 text-sm text-slate-500">{req.contact_name} · {req.contact_phone}</div>
         <div className="flex flex-wrap gap-2">
           <Badge>{roleLabel(req.role)}</Badge>
-          <Badge className="capitalize">{req.status}</Badge>
           {req.lead_score && <Badge className="capitalize">{req.lead_score}</Badge>}
         </div>
+        <div className="mt-3 space-y-2">
+          <div className="text-sm font-semibold text-slate-800">Status</div>
+          <StatusPills
+            value={req.status === "matched" ? "active" : req.status}
+            options={LEAD_STATUS_OPTIONS}
+            onChange={setLeadStatus}
+            disabled={statusSaving}
+          />
+          <p className="text-xs text-slate-500">
+            {req.role === "renter" || req.role === "buyer"
+              ? "Paused or closed leads leave matching."
+              : "Paused or closed supply leads hide the linked property from Available + matching."}
+          </p>
+        </div>
+        {(req.role === "landlord" || req.role === "seller") && req.contact_id && (
+          <Link
+            href={`/listings/new?contact_id=${req.contact_id}&stream=${req.stream_type}`}
+            className="mt-3 inline-flex text-sm font-medium text-emerald-700 underline"
+          >
+            Add another property for {req.contact_name || "this owner"}
+          </Link>
+        )}
         <div className="mt-3 space-y-1 text-sm text-slate-600">
           {req.property_types?.length ? (
             <div>Types: {req.property_types.map((t) => PROPERTY_TYPES.find((p) => p.value === t)?.label || t).join(", ")}</div>

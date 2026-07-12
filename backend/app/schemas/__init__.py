@@ -313,6 +313,40 @@ class ListingMediaResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ListingUpdate(BaseModel):
+    contact_id: UUID | None = None
+    title: str | None = None
+    location_text: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    bhk: str | None = None
+    property_type: str | None = None
+    sqft: float | None = None
+    price: float | None = None
+    builder_name: str | None = None
+    project_name: str | None = None
+    land_area_cent: float | None = None
+    launching_time: str | None = None
+    completion_time: str | None = None
+    total_floors: int | None = None
+    parking_details: str | None = None
+    available_floors: str | None = None
+    amenities: list[str] | None = None
+    base_price: float | None = None
+    car_parking_price: float | None = None
+    gst_percent: float | None = None
+    down_payment_percent: float | None = None
+    utility_charge: float | None = None
+    total_instalment: float | None = None
+    total_amount: float | None = None
+    price_as_of_date: date | None = None
+    monthly_rent: float | None = None
+    security_deposit: float | None = None
+    maintenance: float | None = None
+    status: str | None = None
+    description: str | None = None
+
+
 class ListingResponse(ListingCreate):
     id: UUID
     cover_url: str | None = None
@@ -356,6 +390,30 @@ class LeadRequirementCreate(BaseModel):
     urgency: str | None = None
     lead_score: str | None = None
     status: str = "active"
+    notes: str | None = None
+    preferred_tenant_types: list[str] | None = None
+    listing_id: UUID | None = None
+    assigned_user_id: UUID | None = None
+
+
+class LeadRequirementUpdate(BaseModel):
+    role: str | None = None
+    stream_type: str | None = None
+    property_types: list[str] | None = None
+    preferred_locations: list[str] | None = None
+    location_anchors: list[LocationAnchor] | None = None
+    city: str | None = None
+    search_radius_km: float | None = None
+    bhk: str | None = None
+    budget_min: float | None = None
+    budget_max: float | None = None
+    rent_budget: float | None = None
+    security_deposit: float | None = None
+    maintenance: float | None = None
+    move_in_date: date | None = None
+    urgency: str | None = None
+    lead_score: str | None = None
+    status: str | None = None
     notes: str | None = None
     preferred_tenant_types: list[str] | None = None
     listing_id: UUID | None = None

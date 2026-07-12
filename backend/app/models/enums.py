@@ -58,6 +58,7 @@ class ActivityType(str, enum.Enum):
 
 class ListingStatus(str, enum.Enum):
     AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
     HOLD = "hold"
     SOLD = "sold"
     RENTED = "rented"

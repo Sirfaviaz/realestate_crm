@@ -548,10 +548,20 @@ export const searchApi = {
 };
 
 export const listingsApi = {
-  list: (params?: { stream_type?: string; contact_id?: string; q?: string; bhk?: string; min_price?: number; max_price?: number; sync?: boolean }) => {
+  list: (params?: {
+    stream_type?: string;
+    contact_id?: string;
+    status?: string;
+    q?: string;
+    bhk?: string;
+    min_price?: number;
+    max_price?: number;
+    sync?: boolean;
+  }) => {
     const qs = new URLSearchParams();
     if (params?.stream_type) qs.set("stream_type", params.stream_type);
     if (params?.contact_id) qs.set("contact_id", params.contact_id);
+    if (params?.status) qs.set("status", params.status);
     if (params?.q) qs.set("q", params.q);
     if (params?.bhk) qs.set("bhk", params.bhk);
     if (params?.min_price != null) qs.set("min_price", String(params.min_price));
@@ -563,6 +573,8 @@ export const listingsApi = {
   get: (id: string) => api<Listing>(`/listings/${id}`),
   create: (data: Partial<Listing>) =>
     api<Listing>("/listings", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<Listing>) =>
+    api<Listing>(`/listings/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   syncFromLeads: () =>
     api<{ linked: number; created: number }>("/listings/sync-from-leads", { method: "POST" }),
   uploadMedia: (listingId: string, file: File, sortOrder = 0) => {

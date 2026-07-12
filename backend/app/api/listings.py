@@ -12,12 +12,15 @@ from app.models.contact import Contact
 from app.models.enums import UserRole
 from app.models.listing import Listing, ListingMedia
 from app.models.user import User
-from app.schemas import ListingCreate, ListingMediaResponse, ListingResponse
+from app.models.requirement import LeadRequirement
+from app.schemas import ListingCreate, ListingMediaResponse, ListingResponse, ListingUpdate
 from app.services.matching import match_all_active
 from app.services.listing_sync import sync_listings_from_supply_leads
 from app.services.storage import resolve_media_path, save_upload
 
 router = APIRouter(prefix="/listings", tags=["listings"])
+
+LISTING_STATUSES = {"available", "unavailable", "hold", "sold", "rented"}
 
 
 def _listing_url(listing: Listing) -> ListingResponse:
@@ -56,6 +59,11 @@ async def sync_from_leads(
 async def list_listings(
     stream_type: str | None = None,
     contact_id: UUID | None = None,
+    listing_status: str | None = Query(
+        None,
+        alias="status",
+        description="available|unavailable|hold|sold|rented|all — default available, or all when contact_id set",
+    ),
     q: str | None = None,
     bhk: str | None = None,
     min_price: float | None = None,
@@ -66,7 +74,19 @@ async def list_listings(
 ):
     if sync:
         await sync_listings_from_supply_leads(db)
-    stmt = select(Listing).options(selectinload(Listing.media), selectinload(Listing.contact)).where(Listing.status == "available")
+    stmt = select(Listing).options(selectinload(Listing.media), selectinload(Listing.contact))
+    status_filter = listing_status
+    if status_filter is None:
+        status_filter = "all" if contact_id else "available"
+    if status_filter != "all":
+        statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+        invalid = [s for s in statuses if s not in LISTING_STATUSES]
+        if invalid:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid status: {', '.join(invalid)}")
+        if len(statuses) == 1:
+            stmt = stmt.where(Listing.status == statuses[0])
+        else:
+            stmt = stmt.where(Listing.status.in_(statuses))
     if stream_type:
         stmt = stmt.where(Listing.stream_type == stream_type)
     if contact_id:
@@ -121,6 +141,59 @@ async def create_listing(
         await match_all_active(db)
     result = await db.execute(
         select(Listing).options(selectinload(Listing.media), selectinload(Listing.contact)).where(Listing.id == listing.id)
+    )
+    return _listing_url(result.scalar_one())
+
+
+@router.patch("/{listing_id}", response_model=ListingResponse)
+async def update_listing(
+    listing_id: UUID,
+    body: ListingUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.USER)),
+):
+    result = await db.execute(
+        select(Listing).options(selectinload(Listing.media), selectinload(Listing.contact)).where(Listing.id == listing_id)
+    )
+    listing = result.scalar_one_or_none()
+    if not listing:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Listing not found")
+
+    data = body.model_dump(exclude_unset=True)
+    new_status = data.get("status")
+    if new_status is not None and new_status not in LISTING_STATUSES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid status: {new_status}")
+
+    for key, value in data.items():
+        setattr(listing, key, value)
+
+    if new_status is not None:
+        linked = (
+            await db.execute(
+                select(LeadRequirement).where(
+                    LeadRequirement.listing_id == listing.id,
+                    LeadRequirement.status.in_(["active", "matched", "paused"]),
+                )
+            )
+        ).scalars().all()
+        if new_status == "available":
+            for req in linked:
+                if req.status == "paused":
+                    req.status = "active"
+        elif new_status in ("unavailable", "hold"):
+            for req in linked:
+                if req.status in ("active", "matched"):
+                    req.status = "paused"
+        elif new_status in ("sold", "rented"):
+            for req in linked:
+                req.status = "closed"
+
+    await db.commit()
+    if new_status == "available":
+        await match_all_active(db)
+
+    result = await db.execute(
+        select(Listing).options(selectinload(Listing.media), selectinload(Listing.contact)).where(Listing.id == listing_id)
     )
     return _listing_url(result.scalar_one())
 
