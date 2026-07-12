@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
+import logging
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,8 @@ from app.models.contact import Contact
 from app.models.inventory import Project, UnitOption, UnitSpec
 from app.models.listing import Listing
 from app.models.requirement import LeadRequirement, RequirementMatch
+
+logger = logging.getLogger(__name__)
 
 
 def _contact_dict(c: Contact) -> dict:
@@ -130,21 +133,35 @@ async def get_dashboard(db: AsyncSession, user_id: UUID | None = None) -> dict:
         )
     ).scalars().all()
 
-    match_stmt = (
-        select(RequirementMatch)
-        .options(
-            selectinload(RequirementMatch.listing).selectinload(Listing.contact),
-            selectinload(RequirementMatch.spec).selectinload(UnitSpec.option).selectinload(UnitOption.project).selectinload(Project.location),
-            selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
-            selectinload(RequirementMatch.matched_requirement).selectinload(LeadRequirement.contact),
+    matches_to_inform: list = []
+    try:
+        match_stmt = (
+            select(RequirementMatch)
+            .options(
+                selectinload(RequirementMatch.listing).selectinload(Listing.contact),
+                selectinload(RequirementMatch.spec)
+                .selectinload(UnitSpec.option)
+                .selectinload(UnitOption.project)
+                .selectinload(Project.location),
+                selectinload(RequirementMatch.requirement).selectinload(LeadRequirement.contact),
+                selectinload(RequirementMatch.matched_requirement).selectinload(LeadRequirement.contact),
+            )
+            .where(RequirementMatch.status == "new")
+            .order_by(RequirementMatch.created_at.desc())
+            .limit(20)
         )
-        .where(RequirementMatch.status == "new")
-        .order_by(RequirementMatch.created_at.desc())
-        .limit(20)
-    )
-    if user_id:
-        match_stmt = match_stmt.join(LeadRequirement).where(LeadRequirement.assigned_user_id == user_id)
-    matches_to_inform = (await db.execute(match_stmt)).scalars().all()
+        if user_id:
+            # Explicit ON clause — requirement_matches has two FKs to lead_requirements.
+            match_stmt = match_stmt.join(
+                LeadRequirement,
+                RequirementMatch.requirement_id == LeadRequirement.id,
+            ).where(LeadRequirement.assigned_user_id == user_id)
+        matches_to_inform = list((await db.execute(match_stmt)).scalars().all())
+    except Exception as exc:
+        # Missing migration columns or stale schema should not take down the whole Today page.
+        logger.warning("Dashboard matches query failed: %s", exc)
+        await db.rollback()
+        matches_to_inform = []
 
     role_counts: dict[str, int] = {}
     for role, aliases in [

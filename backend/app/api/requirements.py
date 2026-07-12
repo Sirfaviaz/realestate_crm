@@ -379,6 +379,9 @@ async def pending_matches(
         .limit(50)
     )
     if user.role != UserRole.ADMIN.value:
-        stmt = stmt.join(LeadRequirement).where(LeadRequirement.assigned_user_id == user.id)
+        stmt = stmt.join(
+            LeadRequirement,
+            RequirementMatch.requirement_id == LeadRequirement.id,
+        ).where(LeadRequirement.assigned_user_id == user.id)
     result = await db.execute(stmt)
     return [_match_response(m) for m in result.scalars().all()]
