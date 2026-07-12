@@ -275,14 +275,26 @@ function PersonDetailPanel({
   const activeReqs = requirements.filter((r) => r.status === "active" || r.status === "matched");
   const timeline = buildTimeline(contact, activities);
 
+  const reqByListingId = new Map(
+    shownReqs.filter((r) => r.listing_id).map((r) => [r.listing_id as string, r])
+  );
+  const listingIds = new Set(listings.map((l) => l.id));
+  /** Supply reqs with no linked listing (or listing not loaded) — show once as lead. */
+  const orphanSupplyReqs = shownReqs.filter(
+    (r) => (r.role === "landlord" || r.role === "seller") && (!r.listing_id || !listingIds.has(r.listing_id))
+  );
+  const demandReqs = shownReqs.filter((r) => r.role === "renter" || r.role === "buyer");
+  const hasSupplyRows = listings.length > 0 || orphanSupplyReqs.length > 0;
+  const hasDemandRows = demandReqs.length > 0;
+
   return (
     <>
       {(isDemand || isSupply) && (
         <div>
           <div className="mb-2 text-sm font-semibold text-slate-800">
-            {isSupply ? "Property details" : "Looking for"}
+            {isSupply && !isDemand ? "Properties" : isDemand && !isSupply ? "Looking for" : "Details"}
           </div>
-          {shownReqs.length === 0 && listings.length === 0 ? (
+          {!hasSupplyRows && !hasDemandRows ? (
             <p className="text-sm text-slate-500">
               {isSupply
                 ? "No property details yet — tap Add property below."
@@ -290,11 +302,19 @@ function PersonDetailPanel({
             </p>
           ) : (
             <div className="space-y-2">
-              {shownReqs.map((r) => (
+              {isSupply &&
+                listings.map((l) => (
+                  <SupplyPropertyCard
+                    key={l.id}
+                    listing={l}
+                    req={reqByListingId.get(l.id)}
+                    stream={contact.stream_type}
+                  />
+                ))}
+              {isSupply &&
+                orphanSupplyReqs.map((r) => <RequirementSummary key={r.id} req={r} />)}
+              {demandReqs.map((r) => (
                 <RequirementSummary key={r.id} req={r} />
-              ))}
-              {isSupply && listings.map((l) => (
-                <ListingSummary key={l.id} listing={l} stream={contact.stream_type} />
               ))}
             </div>
           )}
@@ -355,6 +375,60 @@ function PersonDetailPanel({
   );
 }
 
+function SupplyPropertyCard({
+  listing,
+  req,
+  stream,
+}: {
+  listing: Listing;
+  req?: LeadRequirement;
+  stream: string;
+}) {
+  const title = listing.project_name || listing.title;
+  const area = listing.location_text;
+  const price =
+    listing.monthly_rent != null || listing.price != null
+      ? formatPrice(listing.monthly_rent ?? listing.price, stream)
+      : null;
+  const status =
+    listing.status !== "available"
+      ? listing.status
+      : req && req.status !== "active" && req.status !== "matched"
+        ? req.status
+        : null;
+
+  return (
+    <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-slate-700">
+      <Link href={`/listings/${listing.id}`} className="font-medium text-emerald-900 underline">
+        {title}
+      </Link>
+      {area && <div>{area}</div>}
+      <div className="mt-1 flex flex-wrap gap-1">
+        {listing.bhk && <Badge>{listing.bhk}</Badge>}
+        {listing.property_type && <Badge>{listing.property_type}</Badge>}
+        {status && <Badge className="capitalize bg-amber-100 text-amber-900">{status}</Badge>}
+      </div>
+      {price && <div className="mt-1">{price}</div>}
+      {listing.security_deposit != null && (
+        <div>Deposit: {formatPrice(listing.security_deposit, "sales")}</div>
+      )}
+      {listing.maintenance != null && (
+        <div>Maintenance: {formatPrice(listing.maintenance, "rental")}</div>
+      )}
+      <div className="mt-1 flex flex-wrap gap-3">
+        <Link href={`/listings/${listing.id}`} className="text-xs font-medium text-emerald-700 underline">
+          View property
+        </Link>
+        {req && (
+          <Link href={`/leads/${req.id}`} className="text-xs font-medium text-emerald-700 underline">
+            Matches
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function RequirementSummary({ req }: { req: LeadRequirement }) {
   const typeLabel = req.property_types?.map(
     (t) => PROPERTY_TYPES.find((p) => p.value === t)?.label || t
@@ -373,7 +447,7 @@ function RequirementSummary({ req }: { req: LeadRequirement }) {
   return (
     <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-slate-700">
       <div className="font-medium text-emerald-900">
-        {isSupply ? "Listing lead" : "Search"} · {roleLabel(req.role)}
+        {isSupply ? "Property" : "Search"} · {roleLabel(req.role)}
         {req.bhk ? ` · ${req.bhk}` : ""}
         {typeLabel ? ` · ${typeLabel}` : ""}
         {req.status !== "active" && req.status !== "matched" ? ` · ${req.status}` : ""}
@@ -395,27 +469,6 @@ function RequirementSummary({ req }: { req: LeadRequirement }) {
       <Link href={`/leads/${req.id}`} className="mt-1 inline-block text-xs font-medium text-emerald-700 underline">
         View lead & matches
       </Link>
-    </div>
-  );
-}
-
-function ListingSummary({ listing, stream }: { listing: Listing; stream: string }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-      <Link href={`/listings/${listing.id}`} className="font-medium text-emerald-800 underline">
-        {listing.project_name || listing.title}
-      </Link>
-      {listing.location_text && <div>{listing.location_text}</div>}
-      <div className="mt-1 flex flex-wrap gap-1">
-        {listing.bhk && <Badge>{listing.bhk}</Badge>}
-        {listing.property_type && <Badge>{listing.property_type}</Badge>}
-        {listing.status !== "available" && (
-          <Badge className="capitalize bg-amber-100 text-amber-900">{listing.status}</Badge>
-        )}
-      </div>
-      {(listing.monthly_rent != null || listing.price != null) && (
-        <div className="mt-1">{formatPrice(listing.monthly_rent ?? listing.price, stream)}</div>
-      )}
     </div>
   );
 }
