@@ -183,6 +183,10 @@ export default function RequirementDetailPage() {
       req.profession ||
       req.workplace_text);
 
+  const visibleMatches = matches.filter(
+    (m) => m.status !== "rejected" && m.status !== "closed"
+  );
+
   if (loading || !req) {
     return (
       <AppShell>
@@ -213,19 +217,19 @@ export default function RequirementDetailPage() {
           {req.property_types?.length ? (
             <div>Types: {req.property_types.map((t) => PROPERTY_TYPES.find((p) => p.value === t)?.label || t).join(", ")}</div>
           ) : null}
-          {(req.preferred_locations?.length || req.location_anchors?.length) ? (
+          {req.preferred_locations?.length || req.location_anchors?.length ? (
             <div>
-              Preferred areas:{" "}
+              {req.role === "landlord" || req.role === "seller" ? "Property area" : "Preferred areas"}:{" "}
               {(req.preferred_locations?.length
                 ? req.preferred_locations
                 : (req.location_anchors || []).map((a) => a.name).filter(Boolean)
               )
-                .map((loc, i) => `${i + 1}. ${loc}`)
+                .map((loc, i) => (req.role === "landlord" || req.role === "seller" ? loc : `${i + 1}. ${loc}`))
                 .join(" · ")}
             </div>
           ) : null}
           {req.city && <div>City: {req.city}</div>}
-          {req.search_radius_km != null && (
+          {req.search_radius_km != null && req.role !== "landlord" && req.role !== "seller" && (
             <div>Radius: {req.search_radius_km === 0 ? "Whole city" : `${req.search_radius_km} km`}</div>
           )}
           {req.bhk && <div>BHK: {req.bhk}</div>}
@@ -304,7 +308,7 @@ export default function RequirementDetailPage() {
 
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-semibold">
-          Matches ({matches.length})
+          Matches ({visibleMatches.length})
           {req.role === "landlord"
             ? " — renters"
             : req.role === "seller"
@@ -316,7 +320,7 @@ export default function RequirementDetailPage() {
         </button>
       </div>
 
-      {matches.length === 0 ? (
+      {visibleMatches.length === 0 ? (
         <EmptyState
           message={
             req.role === "landlord"
@@ -328,7 +332,7 @@ export default function RequirementDetailPage() {
         />
       ) : (
         <div className="mb-6 space-y-3">
-          {matches.map((m) => (
+          {visibleMatches.map((m) => (
             <Card key={m.id} className={m.status === "new" ? "border-orange-200 bg-orange-50/50" : ""}>
               <div className="flex gap-3">
                 {m.cover_url && (
