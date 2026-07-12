@@ -75,6 +75,8 @@ export default function LeadsPage() {
   });
   const [locationAnchors, setLocationAnchors] = useState<LocationAnchor[]>([]);
   const [cityCenter, setCityCenter] = useState<{ lat: number; lng: number } | null>(null);
+  const [pinLat, setPinLat] = useState<number | null>(null);
+  const [pinLng, setPinLng] = useState<number | null>(null);
   /** Landlord: empty = all tenant types welcome. */
   const [preferredTenantTypes, setPreferredTenantTypes] = useState<string[]>([]);
   const [mediaFiles, setMediaFiles] = useState<File[]>([]);
@@ -167,6 +169,8 @@ export default function LeadsPage() {
         city: reqForm.city,
         location_anchors: locationAnchors,
         city_center: cityCenter,
+        pin_lat: pinLat,
+        pin_lng: pinLng,
         bhk: reqForm.bhk,
         preferred_tenant_types: preferredTenantTypes,
         budget_max: reqForm.budget_max,
@@ -281,8 +285,8 @@ export default function LeadsPage() {
           stream_type: meta.stream,
           title,
           location_text: [area, reqForm.city].filter(Boolean).join(", "),
-          latitude: anchor?.lat,
-          longitude: anchor?.lng,
+          latitude: pinLat ?? anchor?.lat,
+          longitude: pinLng ?? anchor?.lng,
           bhk: reqForm.bhk || undefined,
           property_type: propType,
           price: meta.stream === "rental" ? rent : asking,
@@ -341,6 +345,8 @@ export default function LeadsPage() {
     });
     setLocationAnchors([]);
     setCityCenter(null);
+    setPinLat(null);
+    setPinLng(null);
     setPreferredTenantTypes([]);
     setMediaFiles([]);
     setMediaError(null);
@@ -559,6 +565,8 @@ export default function LeadsPage() {
               city: reqForm.city,
               location_anchors: locationAnchors,
               city_center: cityCenter,
+              pin_lat: pinLat,
+              pin_lng: pinLng,
               bhk: reqForm.bhk,
               preferred_tenant_types: preferredTenantTypes,
               budget_max: reqForm.budget_max,
@@ -590,6 +598,8 @@ export default function LeadsPage() {
               setCityCenter(v.city_center);
               setPreferredTenantTypes(v.preferred_tenant_types);
               setMediaFiles(v.media_files);
+              setPinLat(v.pin_lat);
+              setPinLng(v.pin_lng);
             }}
             mediaBusy={mediaBusy}
             mediaStatus={mediaStatus}

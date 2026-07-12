@@ -12,6 +12,7 @@ import { BHK_OPTIONS } from "@/lib/inventory-presets";
 import { formatFileSize, mediaKind, validateMediaFiles } from "@/lib/media-validation";
 import { prepareMediaFiles } from "@/lib/compress-video";
 import { GooglePlacesInput } from "@/components/google-places-input";
+import { PropertyMapPin } from "@/components/property-map-pin";
 import { FormSelect, Input, Textarea } from "@/components/ui";
 
 export type SupplyPropertyValues = {
@@ -19,6 +20,8 @@ export type SupplyPropertyValues = {
   city: string;
   location_anchors: LocationAnchor[];
   city_center: { lat: number; lng: number } | null;
+  pin_lat: number | null;
+  pin_lng: number | null;
   bhk: string;
   preferred_tenant_types: string[];
   budget_max: string;
@@ -37,6 +40,8 @@ export const emptySupplyPropertyValues = (): SupplyPropertyValues => ({
   city: "",
   location_anchors: [],
   city_center: null,
+  pin_lat: null,
+  pin_lng: null,
   bhk: "",
   preferred_tenant_types: [],
   budget_max: "",
@@ -57,6 +62,9 @@ export function validateSupplyPropertyValues(
   if (!values.property_types.length) return "Select a property type.";
   if (!values.city.trim()) return "City is required.";
   if (!values.location_anchors.length) return "Property area is required.";
+  if (values.pin_lat == null || values.pin_lng == null) {
+    return "Pin the exact property location on the map.";
+  }
   if (!values.bhk) return "BHK is required.";
   if (role === "landlord") {
     if (!values.rent_budget || Number(values.rent_budget) <= 0) return "Asking rent is required.";
@@ -154,6 +162,9 @@ export function SupplyPropertyForm({
     patch({
       location_anchors: [{ name, lat: place.latitude, lng: place.longitude }],
       city: values.city || place.city,
+      // Seed pin from area search if user hasn't pinned yet
+      pin_lat: values.pin_lat ?? place.latitude,
+      pin_lng: values.pin_lng ?? place.longitude,
     });
   };
 
@@ -244,6 +255,20 @@ export function SupplyPropertyForm({
           </div>
         )}
       </div>
+
+      <PropertyMapPin
+        value={
+          values.pin_lat != null && values.pin_lng != null
+            ? { lat: values.pin_lat, lng: values.pin_lng }
+            : null
+        }
+        onChange={(pin) => patch({ pin_lat: pin.lat, pin_lng: pin.lng })}
+        center={
+          values.location_anchors[0]
+            ? { lat: values.location_anchors[0].lat, lng: values.location_anchors[0].lng }
+            : values.city_center
+        }
+      />
 
       <FormSelect
         value={values.bhk}

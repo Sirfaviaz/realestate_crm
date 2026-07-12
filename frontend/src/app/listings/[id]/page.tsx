@@ -20,6 +20,7 @@ import {
   StatusPills,
   listingStatusLabel,
 } from "@/components/status-pills";
+import { PropertyMapPin } from "@/components/property-map-pin";
 import { AppShell } from "@/components/app-shell";
 import { Badge, Button, Card, EmptyState, Input, ListItem, LoadingSpinner } from "@/components/ui";
 
@@ -275,6 +276,16 @@ export default function ListingDetailPage() {
         </div>
       )}
       {listing.description && <p className="mb-4 text-sm text-slate-600">{listing.description}</p>}
+
+      {listing.latitude != null && listing.longitude != null && (
+        <Card className="mb-4">
+          <PropertyMapPin
+            readOnly
+            value={{ lat: listing.latitude, lng: listing.longitude }}
+            onChange={() => undefined}
+          />
+        </Card>
+      )}
 
       {listing.contact_id && (
         <Link
