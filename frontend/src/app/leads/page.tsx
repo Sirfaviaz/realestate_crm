@@ -539,6 +539,10 @@ export default function LeadsPage() {
           ) : (
             <Input placeholder="Rent budget / month" type="number" value={reqForm.rent_budget} onChange={(e) => setReqForm({ ...reqForm, rent_budget: e.target.value })} />
           )}
+          <select className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" value={reqForm.urgency} onChange={(e) => setReqForm({ ...reqForm, urgency: e.target.value })}>
+            <option value="">Urgency</option>
+            {URGENCY_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+          </select>
           <div>
             <div className="mb-2 text-sm font-medium">Move-in date</div>
             <Input
@@ -547,10 +551,6 @@ export default function LeadsPage() {
               onChange={(e) => setReqForm({ ...reqForm, move_in_date: e.target.value })}
             />
           </div>
-          <select className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" value={reqForm.urgency} onChange={(e) => setReqForm({ ...reqForm, urgency: e.target.value })}>
-            <option value="">Urgency</option>
-            {URGENCY_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-          </select>
           <select className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" value={reqForm.lead_score} onChange={(e) => setReqForm({ ...reqForm, lead_score: e.target.value })}>
             <option value="">Lead score</option>
             {LEAD_SCORE_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
