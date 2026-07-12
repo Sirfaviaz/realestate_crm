@@ -418,21 +418,6 @@ export default function LeadsPage() {
             />
           </div>
           <div>
-            <div className="mb-2 text-sm font-medium">Search radius</div>
-            <div className="flex gap-2">
-              {RADIUS_OPTIONS.map((r) => (
-                <button
-                  key={r.value}
-                  type="button"
-                  onClick={() => setReqForm({ ...reqForm, search_radius_km: r.value })}
-                  className={`rounded-full px-3 py-1 text-sm ${reqForm.search_radius_km === r.value ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
             <div className="mb-2 text-sm font-medium">Preferred areas</div>
             <p className="mb-2 text-xs text-slate-500">
               Add in priority order (1 = most preferred). Use arrows to reorder.
@@ -486,6 +471,21 @@ export default function LeadsPage() {
                 ))}
               </ul>
             )}
+          </div>
+          <div>
+            <div className="mb-2 text-sm font-medium">Search radius</div>
+            <div className="flex gap-2">
+              {RADIUS_OPTIONS.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => setReqForm({ ...reqForm, search_radius_km: r.value })}
+                  className={`rounded-full px-3 py-1 text-sm ${reqForm.search_radius_km === r.value ? "bg-emerald-600 text-white" : "bg-slate-100"}`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
           </div>
           {(role === "renter" || role === "buyer") && (
             <>
