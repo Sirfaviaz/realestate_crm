@@ -68,6 +68,7 @@ export default function LeadsPage() {
     workplace_lng: undefined as number | undefined,
   });
   const [locationAnchors, setLocationAnchors] = useState<LocationAnchor[]>([]);
+  const [cityCenter, setCityCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [savedReqId, setSavedReqId] = useState<string | null>(null);
   const [available, setAvailable] = useState<AvailableNowResponse | null>(null);
 
@@ -116,6 +117,16 @@ export default function LeadsPage() {
       return [...prev, { name, lat: place.latitude!, lng: place.longitude! }];
     });
     if (!reqForm.city && place.city) setReqForm((f) => ({ ...f, city: place.city }));
+  };
+
+  const onCitySelect = (place: { city: string; area: string; latitude?: number; longitude?: number }) => {
+    const cityName = place.city || place.area;
+    setReqForm((f) => ({ ...f, city: cityName }));
+    if (place.latitude != null && place.longitude != null) {
+      setCityCenter({ lat: place.latitude, lng: place.longitude });
+    } else {
+      setCityCenter(null);
+    }
   };
 
   const saveLead = async () => {
@@ -219,6 +230,7 @@ export default function LeadsPage() {
       workplace_lng: undefined,
     });
     setLocationAnchors([]);
+    setCityCenter(null);
     setSavedReqId(null);
     setAvailable(null);
   };
@@ -374,11 +386,20 @@ export default function LeadsPage() {
               ))}
             </div>
           </div>
-          <Input
-            placeholder="City (e.g. Mumbai)"
-            value={reqForm.city}
-            onChange={(e) => setReqForm({ ...reqForm, city: e.target.value })}
-          />
+          <div>
+            <div className="mb-2 text-sm font-medium">City</div>
+            <GooglePlacesInput
+              mode="city"
+              value={reqForm.city}
+              onQueryChange={(city) => {
+                setReqForm((f) => ({ ...f, city }));
+                setCityCenter(null);
+              }}
+              onSelect={onCitySelect}
+              placeholder="Start typing a city..."
+              className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+            />
+          </div>
           <div>
             <div className="mb-2 text-sm font-medium">Search radius</div>
             <div className="flex gap-2">
@@ -395,8 +416,20 @@ export default function LeadsPage() {
             </div>
           </div>
           <div>
-            <div className="mb-2 text-sm font-medium">Pin areas on map</div>
-            <GooglePlacesInput onSelect={addLocationAnchor} placeholder="Add preferred area..." className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4" />
+            <div className="mb-2 text-sm font-medium">Preferred areas</div>
+            <p className="mb-2 text-xs text-slate-500">
+              {cityCenter
+                ? `Suggestions prioritize places in/near ${reqForm.city || "the selected city"}.`
+                : "Select a city above to prioritize nearby areas."}
+            </p>
+            <GooglePlacesInput
+              mode="area"
+              clearOnSelect
+              locationBias={cityCenter}
+              onSelect={addLocationAnchor}
+              placeholder={reqForm.city ? `Area in ${reqForm.city}...` : "Add preferred area..."}
+              className="min-h-12 w-full rounded-xl border-2 border-slate-200 px-4"
+            />
             {locationAnchors.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2">
                 {locationAnchors.map((a) => (
